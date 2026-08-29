@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- লগইন ও সাইনআপ কন্টেইনার -->
+    <div id="authContainer" class="auth-box">
+        <h2 class="logo" style="text-align:center; margin-bottom:15px;">pc471</h2>
+        
+        <!-- লগইন ফর্ম -->
+        <div id="loginForm">
+            <h3>লগইন করুন</h3>
+            <input type="email" id="loginEmail" placeholder="ইমেইল অ্যাড্রেস">
+            <input type="password" id="loginPassword" placeholder="পাসওয়ার্ড">
+            <button class="btn" style="width:100%; margin-top:10px;" onclick="handleLogin()">Log In</button>
+            <p class="auth-toggle">একাউন্ট নেই? <a href="#" onclick="toggleAuth('signup')">সাইনআপ করুন</a></p>
+        </div>
+
+        <!-- সাইনআপ ফর্ম -->
+        <div id="signupForm" style="display:none;">
+            <h3>নতুন একাউন্ট খুলুন</h3>
+            <input type="text" id="signupName" placeholder="আপনার পুরো নাম">
+            <input type="email" id="signupEmail" placeholder="ইমেইল অ্যাড্রেস">
+            <input type="password" id="signupPassword" placeholder="পাসওয়ার্ড">
+            <button class="btn" style="width:100%; margin-top:10px;" onclick="handleSignup()">Sign Up</button>
+            <p class="auth-toggle">একাউন্ট আছে? <a href="#" onclick="toggleAuth('login')">লগইন করুন</a></p>
+        </div>
+    </div>
+
+    <!-- মূল অ্যাপ (লগইনের পর দেখাবে) -->
+    <div id="mainApp" style="display:none;">
+        
+        <!-- হেডার -->
+        <div class="header">
+            <div class="logo">pc471</div>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <div class="header-profile" onclick="switchTab('profileTab', document.querySelectorAll('.tab-btn')[1])">
+                    <div id="headerPicContainer" class="profile-pic-small"></div>
+                </div>
+                <button class="logout-btn" onclick="handleLogout()">Logout</button>
+            </div>
+        </div>
+
+        <!-- নেভিগেশন ট্যাব -->
+        <div class="nav-tabs">
+            <button class="tab-btn active" onclick="switchTab('feedTab', this)">Home</button>
+            <button class="tab-btn" onclick="switchTab('profileTab', this)">Profile</button>
+            <button class="tab-btn" onclick="switchTab('notifTab', this)">
+                Notifs <span id="notifBadge" class="notif-badge">0</span>
+            </button>
+            <button class="tab-btn" onclick="switchTab('friendsTab', this)">Friends</button>
+            <button class="tab-btn" onclick="switchTab('chatTab', this)">Messages</button>
+        </div>
+
+        <div class="container">
+            
+            <!-- ফিড ট্যাব -->
+            <div id="feedTab" class="tab-content active">
+                <div class="card post-create-box">
+                    <div class="post-input-container">
+                        <div id="feedPicContainer" class="profile-pic-small"></div>
+                        <textarea id="postInput" placeholder="What's on your mind?"></textarea>
+                    </div>
+                    
+                    <div id="previewArea" style="display:none; margin-bottom:10px;">
+                        <img id="imagePreview" src="" class="post-image">
+                    </div>
+
+                    <div class="post-create-actions">
+                        <label for="imageInput" class="upload-btn">
+                            🖼️ ছবি যোগ করুন
+                        </label>
+                        <input type="file" id="imageInput" accept="image/*" style="display:none;" onchange="showPreview(event)">
+                        <button class="btn" onclick="addPost()">Post</button>
+                    </div>
+                </div>
+
+                <div id="feedContainer"></div>
+            </div>
+
+            <!-- প্রোফাইল ট্যাব -->
+            <div id="profileTab" class="tab-content">
+                <div class="card" style="padding-top: 0;">
+                    
+                    <!-- কভার কন্টেইনার -->
+                    <div class="cover-container">
+                        <img id="coverImageDisplay" src="">
+                        <label for="coverInput" class="cover-upload-label">
+                            📷 কভার ফটো
+                        </label>
+                        <input type="file" id="coverInput" accept="image/*" style="display:none;" onchange="uploadCoverPic(event)">
+                    </div>
+
+                    <!-- প্রোফাইল পিকচার -->
+                    <div class="profile-avatar-container">
+                        <div class="profile-avatar-wrapper">
+                            <div id="profileAvatarDisplay" style="width:100%; height:100%;"></div>
+                            <label for="profileInput" class="profile-camera-badge">
+                                📷
+                                <input type="file" id="profileInput" accept="image/*" style="display:none;" onchange="uploadProfilePic(event)">
+                            </label>
+                        </div>
+                    </div>
+
+                    <h3 style="margin-top: 10px; text-align: center;">প্রোফাইল এডিট করুন</h3>
+                    <div class="form-group">
+                        <input type="text" id="profName" placeholder="আপনার নাম">
+                        <input type="text" id="profLocation" placeholder="বর্তমান ঠিকানা">
+                        <input type="text" id="profHometown" placeholder="নিজ জেলা">
+                        <input type="text" id="profCollege" placeholder="কলেজ / বিশ্ববিদ্যালয়">
+                        <input type="text" id="profMusic" placeholder="প্রিয় গান / শিল্পী">
+                        <input type="text" id="profHobbies" placeholder="শখ">
+                        <button class="btn" onclick="saveProfileDetails()">তথ্য সেভ করুন</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- নোটিফিকেশন ট্যাব -->
+            <div id="notifTab" class="tab-content">
+                <h3>নোটিফিকেশন</h3>
+                <div id="notifContainer" style="margin-top:10px;"></div>
+            </div>
+
+            <!-- ফ্রেন্ডস ট্যাব -->
+            <div id="friendsTab" class="tab-content">
+                <div class="card">
+                    <h3>বন্ধু খুঁজুন / রিকোয়েস্ট পাঠান</h3>
+                    <div style="display:flex; gap:8px; margin-top:10px;">
+                        <input type="text" id="friendNameInput" placeholder="বন্ধুর নাম লিখুন..." style="flex:1;">
+                        <button class="btn" onclick="addFriendRequest()">পাঠান</button>
+                    </div>
+                </div>
+                <div id="friendsContainer" style="margin-top:10px;"></div>
+            </div>
+
+            <!-- চ্যাট ট্যাব -->
+            <div id="chatTab" class="tab-content">
+                <div class="card">
+                    <h3>মেসেঞ্জার</h3>
+                    <div id="chatMessagesBox" class="chat-box"></div>
+                    <div style="display:flex; gap:8px;">
+                        <input type="text" id="chatMsgInput" placeholder="মেসেজ লিখুন..." style="flex:1;">
+                        <button class="btn" onclick="sendDirectMessage()">Send</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>
