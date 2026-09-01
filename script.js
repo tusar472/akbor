@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, push, onValue, remove, update, set } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+import { getDatabase, ref, push, onValue, remove, update, set, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 const firebaseConfig = {
@@ -21,6 +21,7 @@ let profilePicData = null;
 let coverPicData = null;
 let cachedUserName = "User";
 let unreadNotifCount = 0;
+let viewingUserId = null;
 
 window.toggleAuth = function(type) {
     if(type === 'signup') {
@@ -110,7 +111,17 @@ window.switchTab = function(tabId, element) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     
     document.getElementById(tabId).classList.add('active');
-    element.classList.add('active');
+    if(element) element.classList.add('active');
+
+    if(tabId === 'profileTab' && auth.currentUser) {
+        if(!viewingUserId || viewingUserId === auth.currentUser.uid) {
+            loadUserData(auth.currentUser.uid);
+            showEditButtons(true);
+            loadProfileStats(auth.currentUser.uid);
+            const actionBox = document.getElementById('profileActionBox');
+            if(actionBox) actionBox.style.display = 'none';
+        }
+    }
 
     if (tabId === 'notifTab') {
         unreadNotifCount = 0;
@@ -136,9 +147,12 @@ function updateProfileUI(imgUrl) {
 }
 
 function createAutoPost(caption, imageSrc) {
+    const user = auth.currentUser;
     const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     push(ref(db, 'posts'), {
+        userId: user ? user.uid : "",
         userName: cachedUserName,
+        userPic: profilePicData || "",
         content: caption,
         image: imageSrc,
         time: timeNow,
@@ -208,6 +222,7 @@ window.showPreview = function(event) {
 };
 
 window.addPost = function() {
+    const user = auth.currentUser;
     const postInput = document.getElementById("postInput");
     const text = postInput.value.trim();
 
@@ -216,7 +231,9 @@ window.addPost = function() {
     const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     push(ref(db, 'posts'), {
+        userId: user ? user.uid : "",
         userName: cachedUserName,
+        userPic: profilePicData || "",
         content: text,
         image: selectedImageData || "",
         time: timeNow,
@@ -238,7 +255,6 @@ window.toggleLike = function(postId, currentLikes) {
     const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     update(ref(db, 'posts/' + postId), { likes: (currentLikes || 0) + 1 });
 
-    // লাইক দিলে নোটিফিকেশনে পুশ হবে
     push(ref(db, 'notifications'), {
         text: `👍 ${cachedUserName} আপনার/একটি পোস্টে লাইক দিয়েছে!`,
         time: timeNow
@@ -251,7 +267,6 @@ window.deletePost = function(postId) {
     }
 };
 
-// কমেন্ট ফাংশন আপডেট করা হয়েছে (নোটিফিকেশনসহ)
 window.addComment = function(postId) {
     const input = document.getElementById(`comment-input-${postId}`);
     const text = input.value.trim();
@@ -259,19 +274,141 @@ window.addComment = function(postId) {
 
     const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    // ১. কমেন্ট সেভ হবে
     push(ref(db, `posts/${postId}/comments`), { 
         userName: cachedUserName,
         text: text 
     });
 
-    // ২. নোটিফিকেশনে ডাটা পাঠানো হবে
     push(ref(db, 'notifications'), {
         text: `💬 ${cachedUserName} কমেন্ট করেছেন: "${text}"`,
         time: timeNow
     });
 
     input.value = "";
+};
+
+// ================= প্রোফাইল ভিউ, ফলোয়ার ও ছবি সংখ্যা হ্যান্ডলার =================
+
+window.openUserProfile = function(userId) {
+    if (!userId) return;
+    viewingUserId = userId;
+
+    const currentUser = auth.currentUser;
+    const isSelf = currentUser && currentUser.uid === userId;
+
+    get(ref(db, 'userProfile/' + userId)).then((snapshot) => {
+        if (snapshot.exists()) {
+            const data = snapshot.val();
+            
+            document.getElementById('profName').value = data.name || '';
+            document.getElementById('profLocation').value = data.location || '';
+            document.getElementById('profHometown').value = data.hometown || '';
+            document.getElementById('profCollege').value = data.college || '';
+            document.getElementById('profMusic').value = data.music || '';
+            document.getElementById('profHobbies').value = data.hobbies || '';
+
+            const avatarDisplay = document.getElementById("profileAvatarDisplay");
+            if (avatarDisplay) {
+                if (data.photo) {
+                    avatarDisplay.innerHTML = `<img src="${data.photo}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;">`;
+                } else {
+                    avatarDisplay.innerHTML = `<svg class="default-avatar-svg" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>`;
+                }
+            }
+
+            const coverDisplay = document.getElementById("coverImageDisplay");
+            if (coverDisplay) {
+                coverDisplay.src = data.coverPhoto || "";
+            }
+
+            showEditButtons(isSelf);
+            const actionBox = document.getElementById('profileActionBox');
+            if(actionBox) actionBox.style.display = isSelf ? 'none' : 'block';
+
+            loadProfileStats(userId);
+            if (!isSelf && currentUser) {
+                checkFollowStatus(currentUser.uid, userId);
+            }
+
+            const profileTabBtn = document.querySelectorAll('.tab-btn')[1];
+            switchTab('profileTab', profileTabBtn);
+        }
+    });
+};
+
+function showEditButtons(isSelf) {
+    const coverUploadLabel = document.querySelector('.cover-upload-label');
+    const profileCameraBadge = document.querySelector('.profile-camera-badge');
+    const saveBtn = document.querySelector('#profileTab .btn');
+
+    if(coverUploadLabel) coverUploadLabel.style.display = isSelf ? 'inline-block' : 'none';
+    if(profileCameraBadge) profileCameraBadge.style.display = isSelf ? 'flex' : 'none';
+    if(saveBtn) saveBtn.style.display = isSelf ? 'block' : 'none';
+}
+
+function loadProfileStats(targetUid) {
+    onValue(ref(db, `followers/${targetUid}`), (snapshot) => {
+        const count = snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
+        document.getElementById('followersCount').innerText = count;
+    });
+
+    onValue(ref(db, `following/${targetUid}`), (snapshot) => {
+        const count = snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
+        document.getElementById('followingCount').innerText = count;
+    });
+
+    onValue(ref(db, 'posts'), (snapshot) => {
+        let photoCount = 0;
+        if (snapshot.exists()) {
+            const posts = snapshot.val();
+            Object.values(posts).forEach(p => {
+                if (p.userId === targetUid && p.image && p.image !== "") {
+                    photoCount++;
+                }
+            });
+        }
+        document.getElementById('photosCount').innerText = photoCount;
+    });
+}
+
+function checkFollowStatus(currentUid, targetUid) {
+    get(ref(db, `followers/${targetUid}/${currentUid}`)).then(snapshot => {
+        const followBtn = document.getElementById('followBtn');
+        if (snapshot.exists()) {
+            followBtn.innerText = "✓ ফলো করছেন";
+            followBtn.classList.add('following-active');
+        } else {
+            followBtn.innerText = "+ ফলো করুন";
+            followBtn.classList.remove('following-active');
+        }
+    });
+}
+
+window.toggleFollow = function() {
+    const currentUser = auth.currentUser;
+    if (!currentUser || !viewingUserId) return;
+
+    const myUid = currentUser.uid;
+    const targetUid = viewingUserId;
+
+    const followerRef = ref(db, `followers/${targetUid}/${myUid}`);
+    const followingRef = ref(db, `following/${myUid}/${targetUid}`);
+
+    get(followerRef).then(snapshot => {
+        if (snapshot.exists()) {
+            remove(followerRef);
+            remove(followingRef);
+        } else {
+            set(followerRef, true);
+            set(followingRef, true);
+
+            push(ref(db, 'notifications'), {
+                text: `👤 ${cachedUserName} আপনাকে ফলো করা শুরু করেছেন!`,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            });
+        }
+        checkFollowStatus(myUid, targetUid);
+    });
 };
 
 window.addFriendRequest = function() {
@@ -348,6 +485,8 @@ onValue(ref(db, 'posts'), (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
 
+    const currentUser = auth.currentUser;
+
     Object.keys(data).reverse().forEach(key => {
         const post = data[key];
         const postElement = document.createElement("div");
@@ -362,15 +501,17 @@ onValue(ref(db, 'posts'), (snapshot) => {
             });
         }
 
-        let userPicHTML = profilePicData 
-            ? `<img src="${profilePicData}">`
+        let userPicHTML = post.userPic 
+            ? `<img src="${post.userPic}">`
             : `<svg class="default-avatar-svg" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>`;
 
+        const isMyPost = currentUser && (post.userId === currentUser.uid);
+
         postElement.innerHTML = `
-            <div class="post-header">
+            <div class="post-header" onclick="openUserProfile('${post.userId}')">
                 <div class="feed-profile-box">${userPicHTML}</div>
                 <div>
-                    <div class="post-header-info">${post.userName || cachedUserName}</div>
+                    <div class="post-header-info">${post.userName || 'User'}</div>
                     <div class="post-time">${post.time || ''}</div>
                 </div>
             </div>
@@ -381,7 +522,7 @@ onValue(ref(db, 'posts'), (snapshot) => {
                 <button class="action-btn" onclick="toggleLike('${key}', ${post.likes || 0})">
                     👍 Like (${post.likes || 0})
                 </button>
-                <button class="action-btn delete-btn" onclick="deletePost('${key}')">🗑️ Delete</button>
+                ${isMyPost ? `<button class="action-btn delete-btn" onclick="deletePost('${key}')">🗑️ Delete</button>` : ''}
             </div>
 
             <div class="comments-section">
