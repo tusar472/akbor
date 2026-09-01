@@ -107,7 +107,28 @@
                         </div>
                     </div>
 
-                    <h3 style="margin-top: 10px; text-align: center;">প্রোফাইল এডিট করুন</h3>
+                    <!-- প্রোফাইল স্ট্যাটস (ফলোয়ার, ফলোয়িং ও ছবির সংখ্যা) -->
+                    <div class="profile-stats">
+                        <div class="stat-item">
+                            <span id="followersCount">0</span>
+                            <p>ফলোয়ার</p>
+                        </div>
+                        <div class="stat-item">
+                            <span id="followingCount">0</span>
+                            <p>ফলোয়িং</p>
+                        </div>
+                        <div class="stat-item">
+                            <span id="photosCount">0</span>
+                            <p>ছবি</p>
+                        </div>
+                    </div>
+
+                    <!-- ফলো / এড করার বাটন -->
+                    <div id="profileActionBox" style="text-align: center; margin-bottom: 15px; display: none;">
+                        <button id="followBtn" class="btn" onclick="toggleFollow()">+ ফলো করুন</button>
+                    </div>
+
+                    <h3 style="margin-top: 10px; text-align: center;">প্রোফাইল তথ্য</h3>
                     <div class="form-group">
                         <input type="text" id="profName" placeholder="আপনার নাম">
                         <input type="text" id="profLocation" placeholder="বর্তমান ঠিকানা">
