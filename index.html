@@ -2,104 +2,317 @@
 <html lang="bn">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>pc471</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: Arial, sans-serif; }
-        body { background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        .auth-card { background: white; padding: 25px; border-radius: 12px; width: 90%; max-width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; }
-        .title { color: #1877f2; font-size: 28px; margin-bottom: 15px; font-weight: bold; }
-        .sub-title { margin-bottom: 20px; font-size: 18px; color: #333; text-align: left; }
-        .input-box { width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; background: #eef4ff; }
-        .btn { width: 100%; padding: 12px; background: #1877f2; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 5px; }
-        .btn:hover { background: #166fe5; }
-        .toggle-link { margin-top: 15px; font-size: 14px; color: #65676b; }
-        .toggle-link span { color: #1877f2; font-weight: bold; cursor: pointer; }
-        
-        /* মেইন অ্যাপ পার্ট */
-        #mainApp { display: none; width: 100%; max-width: 500px; padding: 15px; }
-        .tab-btn { padding: 10px 15px; border: none; background: #e4e6eb; border-radius: 5px; margin-right: 5px; cursor: pointer; }
-        .tab-btn.active { background: #1877f2; color: white; }
-        .tab-content { display: none; margin-top: 15px; }
-        .tab-content.active { display: block; }
-        .card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
-        .post-card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-        .post-image { width: 100%; border-radius: 8px; margin-top: 10px; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>মিনি সোশ্যাল অ্যাপ</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
     <!-- লগইন ও সাইনআপ সেকশন -->
-    <div id="authContainer" class="auth-card">
-        <div class="title">pc471</div>
+    <div id="authContainer">
+        <div id="loginForm" class="auth-box">
+            <h2 style="margin-bottom:15px; text-align:center;">লগইন করুন</h2>
+            <input type="email" id="loginEmail" placeholder="ইমেইল অ্যাড্রেস">
+            <input type="password" id="loginPassword" placeholder="পাসওয়ার্ড">
+            <button id="loginBtn">লগইন</button>
+            <p style="margin-top:10px; font-size:12px; text-align:center;">একাউন্ট নেই? <a href="#" id="toSignupLink">সাইনআপ করুন</a></p>
+        </div>
 
-        <!-- লগইন ফর্ম -->
-        <div id="loginForm">
-            <div class="sub-title">লগইন করুন</div>
-            <input type="email" id="loginEmail" class="input-box" placeholder="ইমেইল দিন">
-            <input type="password" id="loginPassword" class="input-box" placeholder="পাসওয়ার্ড দিন">
-            <button class="btn" id="loginBtn">Log In</button>
-            <div class="toggle-link">
-                একাউন্ট নেই? <span id="toSignupBtn">সাইনআপ করুন</span>
+        <div id="signupForm" class="auth-box" style="display:none;">
+            <h2 style="margin-bottom:15px; text-align:center;">সাইনআপ করুন</h2>
+            <input type="text" id="signupName" placeholder="আপনার নাম">
+            <input type="email" id="signupEmail" placeholder="ইমেইল অ্যাড্রেস">
+            <input type="password" id="signupPassword" placeholder="পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)">
+            <button id="signupBtn">একাউন্ট খুলুন</button>
+            <p style="margin-top:10px; font-size:12px; text-align:center;">আগে থেকেই একাউন্ট আছে? <a href="#" id="toLoginLink">লগইন করুন</a></p>
+        </div>
+    </div>
+
+    <!-- মূল সোশ্যাল অ্যাপ সেকশন -->
+    <div id="mainApp" style="display:none;">
+        <header>
+            <div class="app-title">মিনি অ্যাপ</div>
+            <div class="search-box">
+                <input type="text" id="userSearchInput" placeholder="🔍 বন্ধু খুঁজুন...">
+                <div id="searchResults" class="search-results"></div>
+            </div>
+            <div id="headerPicContainer" class="header-profile-pic"></div>
+        </header>
+
+        <div class="container">
+            <!-- হোম ট্যাব -->
+            <div id="homeTab" class="tab-content active">
+                <div class="card">
+                    <div class="create-post">
+                        <div id="feedPicContainer" style="width:35px; height:35px; border-radius:50%; overflow:hidden; background:#ccc;"></div>
+                        <input type="text" id="postInput" placeholder="আপনার মনে কী আছে?">
+                    </div>
+                    <div id="previewArea" style="display:none; margin-top:10px;">
+                        <img id="imagePreview" style="max-width:100%; height:100px; border-radius:6px; object-fit:cover;">
+                    </div>
+                    <div class="post-actions">
+                        <label style="cursor:pointer; color:#45bd62; font-size:13px; font-weight:bold;">
+                            📷 ছবি দিন
+                            <input type="file" id="postImageInput" accept="image/*" style="display:none;">
+                        </label>
+                        <button id="addPostBtn" class="btn-post">পোস্ট</button>
+                    </div>
+                </div>
+                <div id="feedContainer"></div>
+            </div>
+
+            <!-- প্রোফাইল ট্যাব -->
+            <div id="profileTab" class="tab-content">
+                <div class="card" style="padding:0; overflow:hidden;">
+                    <div class="cover-photo">
+                        <img id="coverImageDisplay" src="">
+                        <label id="coverBtnLabel" style="position:absolute; right:10px; bottom:10px; background:rgba(0,0,0,0.6); color:#fff; padding:4px 8px; border-radius:4px; font-size:11px; cursor:pointer;">
+                            📷 কভার পাল্টান
+                            <input type="file" id="coverPicInput" accept="image/*" style="display:none;">
+                        </label>
+                        <div id="profileAvatarDisplay" class="avatar-container"></div>
+                        <label id="avatarBtnLabel" style="position:absolute; left:60px; bottom:-25px; background:#fff; border-radius:50%; padding:3px; cursor:pointer; font-size:12px;">
+                            📷
+                            <input type="file" id="profilePicInput" accept="image/*" style="display:none;">
+                        </label>
+                    </div>
+
+                    <div style="padding:15px;" class="profile-info-box">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h2 id="displayProfileName" style="font-size:18px;">ইউজার নাম</h2>
+                            <button id="settingsBtn" style="padding:5px 10px; font-size:12px; cursor:pointer; border-radius:4px; border:1px solid #ccc; background:#fff;">⚙️ এডিট</button>
+                        </div>
+
+                        <div style="display:flex; justify-content:space-around; margin:15px 0; font-size:14px; text-align:center; border-top:1px solid #eee; border-bottom:1px solid #eee; padding:10px 0;">
+                            <div class="stat-box" id="followersBtnBox">
+                                <strong id="followersCount">0</strong>
+                                <div style="color:gray; font-size:12px;">Followers</div>
+                            </div>
+                            <div class="stat-box" id="followingBtnBox">
+                                <strong id="followingCount">0</strong>
+                                <div style="color:gray; font-size:12px;">Following</div>
+                            </div>
+                            <div class="stat-box">
+                                <strong id="photosCount">0</strong>
+                                <div style="color:gray; font-size:12px;">Photos</div>
+                            </div>
+                        </div>
+
+                        <button id="followBtn" style="display:none; width:100%; padding:8px; background:#1877f2; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; margin-bottom:10px;">
+                            Follow
+                        </button>
+
+                        <div style="font-size:13px; color:#555; line-height:1.6;">
+                            <div><b>ঠিকানা:</b> <span id="viewLocation">দেওয়া নেই</span></div>
+                            <div><b>হোমটাউন:</b> <span id="viewHometown">দেওয়া নেই</span></div>
+                            <div><b>কলেজ/স্কুল:</b> <span id="viewCollege">দেওয়া নেই</span></div>
+                            <div><b>প্রিয় গান:</b> <span id="viewMusic">দেওয়া নেই</span></div>
+                            <div><b>শখ:</b> <span id="viewHobbies">দেওয়া নেই</span></div>
+                        </div>
+
+                        <div style="margin-top:15px;">
+                            <h4 style="font-size:14px; margin-bottom:8px;">গ্যালারি</h4>
+                            <div id="userPhotosGallery" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:5px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- নোটিফিকেশন ট্যাব -->
+            <div id="notifTab" class="tab-content">
+                <div class="card">
+                    <h3>নোটিফিকেশন</h3>
+                    <div id="notifContainer" style="margin-top:10px;"></div>
+                </div>
+            </div>
+
+            <!-- মেসেজ ট্যাব -->
+            <div id="msgTab" class="tab-content">
+                <div id="chatUserList" class="card">
+                    <h3 style="margin-bottom: 10px;">মেসেজ</h3>
+                    <div id="usersForChatList"></div>
+                </div>
+
+                <div id="chatRoomBox" style="display: none;">
+                    <div class="chat-header">
+                        <div class="chat-header-left">
+                            <button id="closeChatBtn" class="btn-icon">⬅️</button>
+                            <div id="chatReceiverPic" class="chat-receiver-pic"></div>
+                            <b id="chatReceiverName">User</b>
+                        </div>
+                        <div class="call-buttons">
+                            <button id="audioCallBtn" class="call-btn audio-call-btn" title="অডিও কল">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                                </svg>
+                            </button>
+                            <button id="videoCallBtn" class="call-btn video-call-btn" title="ভিডিও কল">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                                </svg>
+                            </button>
+                            <button id="locationCheckBtn" class="call-btn location-check-btn" title="চেক">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="messageDisplayArea"></div>
+
+                    <div class="chat-input-wrapper">
+                        <div class="chat-input-bar">
+                            <button id="emojiBtn" class="chat-icon-btn" title="ইমোজি">😊</button>
+                            <input type="text" id="chatInputText" placeholder="Message" class="chat-text-input">
+                            <label for="chatImageInput" class="chat-icon-btn" title="অ্যাটাচ">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                                </svg>
+                            </label>
+                            <input type="file" id="chatImageInput" accept="image/*,video/*" style="display:none;">
+                            <label for="chatCameraInput" class="chat-icon-btn" title="ক্যামেরা">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                                    <circle cx="12" cy="13" r="4"></circle>
+                                </svg>
+                            </label>
+                            <input type="file" id="chatCameraInput" accept="image/*" capture="environment" style="display:none;">
+                        </div>
+                        
+                        <button id="recordAudioBtn" class="mic-btn" title="ভয়েস নোট">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                            </svg>
+                        </button>
+                        
+                        <button id="sendChatMsgBtn" class="send-btn" style="display:none;" title="পাঠান">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div id="recordingIndicator" class="recording-indicator" style="display:none;">
+                        <span class="rec-dot"></span>
+                        <span id="recordingTimer">0:00</span>
+                        <button id="stopRecordBtn" class="stop-rec-btn">রেকর্ড শেষ</button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- সাইনআপ ফর্ম -->
-        <div id="signupForm" style="display: none;">
-            <div class="sub-title">সাইনআপ করুন</div>
-            <input type="text" id="signupName" class="input-box" placeholder="আপনার নাম">
-            <input type="email" id="signupEmail" class="input-box" placeholder="ইমেইল দিন">
-            <input type="password" id="signupPassword" class="input-box" placeholder="পাসওয়ার্ড দিন">
-            <button class="btn" id="signupBtn">Sign Up</button>
-            <div class="toggle-link">
-                একাউন্ট আছে? <span id="toLoginBtn">লগইন করুন</span>
+        <div class="bottom-nav">
+            <button id="btnHomeTab" class="tab-btn active">🏠</button>
+            <button id="btnNotifTab" class="tab-btn">
+                🔔 <span id="notifBadge" class="badge">0</span>
+            </button>
+            <button id="btnMsgTab" class="tab-btn">💬</button>
+            <button id="btnProfileTab" class="tab-btn">👤</button>
+        </div>
+    </div>
+
+    <!-- কল মোডাল -->
+    <div id="callModal" class="modal">
+        <div class="modal-content" style="max-width:320px;">
+            <div class="call-modal-body">
+                <video id="remoteVideo" class="remote-video" autoplay playsinline></video>
+                <video id="localVideo" class="local-video" autoplay playsinline muted></video>
+            </div>
+            <div style="padding:15px; text-align:center;">
+                <button id="endCallBtn" style="background:red; color:#fff; border:none; padding:10px 25px; border-radius:20px; font-weight:bold; cursor:pointer;">কল কাটুন ❌</button>
             </div>
         </div>
     </div>
 
-    <!-- মেইন অ্যাপ সেকশন (লগইন করার পর দেখাবে) -->
-    <div id="mainApp">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <h2>pc471 App</h2>
-            <button class="btn" id="logoutBtn" style="width: auto; padding: 8px 15px; background: #e4e6eb; color: #333;">Logout</button>
-        </div>
-
-        <div>
-            <button class="tab-btn active" onclick="switchTab('feedTab', this)">Feed</button>
-            <button class="tab-btn" onclick="switchTab('profileTab', this)">Profile</button>
-            <button class="tab-btn" onclick="switchTab('chatTab', this)">Chat</button>
-        </div>
-
-        <!-- ফিড ট্যাব -->
-        <div id="feedTab" class="tab-content active">
-            <div class="card">
-                <textarea id="postInput" class="input-box" style="height: 60px;" placeholder="কী ভাবছেন?"></textarea>
-                <button class="btn" id="addPostBtn">Post</button>
-            </div>
-            <div id="feedContainer"></div>
-        </div>
-
-        <!-- প্রোফাইল ট্যাব -->
-        <div id="profileTab" class="tab-content">
-            <div class="card">
-                <h3>প্রোফাইল সেটিংস</h3>
-                <input type="text" id="profName" class="input-box" placeholder="নাম">
-                <input type="text" id="profLocation" class="input-box" placeholder="ঠিকানা">
-                <button class="btn" id="saveProfBtn">Save Profile</button>
-            </div>
-        </div>
-
-        <!-- চ্যাট ট্যাব -->
-        <div id="chatTab" class="tab-content">
-            <div class="card">
-                <div id="chatMessagesBox" style="height: 200px; overflow-y: auto; margin-bottom: 10px;"></div>
-                <input type="text" id="chatMsgInput" class="input-box" placeholder="মেসেজ লিখুন...">
-                <button class="btn" id="sendMsgBtn">Send</button>
+    <div id="incomingCallModal" class="modal">
+        <div class="modal-content" style="max-width:300px; text-align:center; padding:20px;">
+            <h3 id="incomingCallerName">ইউজার</h3>
+            <p id="incomingCallType" style="color:gray; font-size:13px; margin:10px 0;">কল করছেন...</p>
+            <div style="display:flex; justify-content:space-around; margin-top:15px;">
+                <button id="acceptCallBtn" style="background:green; color:#fff; border:none; padding:10px 20px; border-radius:20px; font-weight:bold; cursor:pointer;">রিসিভ 📞</button>
+                <button id="rejectCallBtn" style="background:red; color:#fff; border:none; padding:10px 20px; border-radius:20px; font-weight:bold; cursor:pointer;">কাটুন ❌</button>
             </div>
         </div>
     </div>
 
-    <!-- JavaScript Module Import -->
+    <!-- প্রোফাইল এডিট মোডাল -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>✏️ প্রোফাইল এডিট করুন</h3>
+                <button id="closeModalBtn" class="close-btn">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>আপনার নাম</label>
+                    <input type="text" id="profName" placeholder="নাম লিখুন">
+                </div>
+                <div class="form-group">
+                    <label>বর্তমান ঠিকানা</label>
+                    <input type="text" id="profLocation" placeholder="যেমন: ঢাকা, বাংলাদেশ">
+                </div>
+                <div class="form-group">
+                    <label>হোমটাউন</label>
+                    <input type="text" id="profHometown" placeholder="যেমন: চট্টগ্রাম">
+                </div>
+                <div class="form-group">
+                    <label>কলেজ / স্কুল</label>
+                    <input type="text" id="profCollege" placeholder="শিক্ষা প্রতিষ্ঠানের নাম">
+                </div>
+                <div class="form-group">
+                    <label>প্রিয় গান</label>
+                    <input type="text" id="profMusic" placeholder="পছন্দের গান">
+                </div>
+                <div class="form-group">
+                    <label>শখ</label>
+                    <input type="text" id="profHobbies" placeholder="যেমন: বই পড়া, কোডিং">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="logoutBtn" class="btn-logout">🚪 লগআউট</button>
+                <button id="saveProfileBtn" class="btn-save">সেভ করুন</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="listModal" class="modal">
+        <div class="modal-content" style="max-height: 80vh;">
+            <div class="modal-header">
+                <h3 id="listModalTitle">তালিকা</h3>
+                <button id="closeListModalBtn" class="close-btn">✕</button>
+            </div>
+            <div id="listModalContainer" class="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- টার্মিনাল মোডাল -->
+    <div id="terminalModal" class="modal">
+        <div class="terminal-box">
+            <div class="terminal-header">
+                <span>Terminal</span>
+                <button id="closeTerminalBtn" class="close-btn" style="color:#fff;">✕</button>
+            </div>
+            <div id="terminalOutput" class="terminal-output"></div>
+            <div class="terminal-input-line">
+                <span class="terminal-prompt">$</span>
+                <input type="text" id="terminalInput" class="terminal-input" autocomplete="off" spellcheck="false">
+            </div>
+        </div>
+    </div>
+
+    <!-- লোকেশন ম্যাপ মোডাল -->
+    <div id="mapModal" class="modal">
+        <div class="modal-content" style="max-width:95vw; height:80vh; padding:0; overflow:hidden;">
+            <div class="modal-header" style="background:#075e54; color:#fff;">
+                <h3 style="color:#fff; margin:0;">📍 লোকেশন ও রাস্তা</h3>
+                <button id="closeMapBtn" class="close-btn" style="color:#fff;">✕</button>
+            </div>
+            <div id="mapContainer" style="width:100%; height:calc(100% - 50px); background:#e5e5e5; position:relative;"></div>
+        </div>
+    </div>
+
     <script type="module" src="script.js"></script>
 </body>
 </html>
