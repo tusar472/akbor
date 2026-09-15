@@ -481,7 +481,6 @@ header {
     gap: 6px;
 }
 
-/* সুন্দর চ্যাট বাবল */
 .msg-bubble {
     max-width: 78%;
     padding: 8px 12px 6px;
@@ -612,7 +611,6 @@ header {
     height: 20px;
 }
 
-/* সবুজ মাইক বাটন */
 .mic-btn {
     width: 46px;
     height: 46px;
@@ -646,7 +644,6 @@ header {
     100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
 }
 
-/* সেন্ড বাটন */
 .send-btn {
     width: 46px;
     height: 46px;
@@ -702,7 +699,6 @@ header {
     cursor: pointer;
 }
 
-/* কল বাটন */
 .call-buttons {
     display: flex;
     gap: 6px;
@@ -746,7 +742,6 @@ header {
     padding: 5px;
 }
 
-/* কল মোডাল ও ভিডিও স্টাইলিং */
 .call-modal-body {
     position: relative;
     width: 100%;
@@ -775,7 +770,6 @@ header {
     background: #222;
 }
 
-/* অডিও ও ভিডিও মেসেজ */
 .msg-audio {
     display: flex;
     align-items: center;
@@ -802,7 +796,6 @@ header {
     text-align: right;
 }
 
-/* লোকেশন চেক আইকন */
 .location-check-btn {
     background: transparent;
     color: #fff;
@@ -878,4 +871,250 @@ header {
 
 .location-link:hover {
     color: #fff;
+}
+
+/* ========== ফুল স্ক্রিন কল UI ========== */
+.call-fullscreen-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #000;
+    z-index: 10000;
+    flex-direction: column;
+}
+
+.call-fullscreen-modal.active,
+.call-fullscreen-modal[style*="flex"] {
+    display: flex !important;
+}
+
+.remote-video-full {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #111;
+}
+
+.local-video-pip {
+    position: absolute;
+    top: 60px;
+    right: 15px;
+    width: 100px;
+    height: 140px;
+    object-fit: cover;
+    border-radius: 12px;
+    border: 2px solid #fff;
+    background: #222;
+    z-index: 2;
+}
+
+.call-top-info {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 20px 15px 10px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
+    color: #fff;
+    text-align: center;
+    z-index: 3;
+}
+
+.call-top-info #callPartnerName {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.call-top-info #callTimer {
+    font-size: 14px;
+    margin-top: 4px;
+    opacity: 0.9;
+}
+
+.call-controls {
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    z-index: 3;
+}
+
+.call-control-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255,255,255,0.2);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    transition: transform 0.2s, background 0.2s;
+}
+
+.call-control-btn:active {
+    transform: scale(0.9);
+}
+
+.call-control-btn.muted {
+    background: #e74c3c;
+}
+
+.end-call-btn {
+    width: 64px;
+    height: 64px;
+    background: #e74c3c !important;
+}
+
+.end-call-btn:active {
+    background: #c0392b !important;
+}
+
+.incoming-call-bg {
+    background: linear-gradient(135deg, #075e54 0%, #128c7e 50%, #075e54 100%);
+    justify-content: center;
+    align-items: center;
+}
+
+.incoming-call-content {
+    text-align: center;
+    color: #fff;
+    padding: 20px;
+}
+
+.incoming-avatar {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    margin: 0 auto 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    overflow: hidden;
+}
+
+.incoming-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.incoming-call-content h2 {
+    font-size: 24px;
+    margin-bottom: 8px;
+}
+
+.incoming-call-content p {
+    font-size: 15px;
+    opacity: 0.9;
+    margin-bottom: 50px;
+}
+
+.incoming-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 50px;
+}
+
+.incoming-btn {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    border: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #fff;
+    font-size: 11px;
+    gap: 2px;
+}
+
+.accept-btn {
+    background: #25D366;
+}
+
+.reject-btn {
+    background: #e74c3c;
+}
+
+.anim-pulse-green {
+    animation: pulseGreen 1.2s infinite;
+}
+
+.anim-pulse-red {
+    animation: pulseRed 1.2s infinite;
+}
+
+@keyframes pulseGreen {
+    0% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0.7); transform: scale(1); }
+    50% { box-shadow: 0 0 0 18px rgba(37, 211, 102, 0); transform: scale(1.08); }
+    100% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0); transform: scale(1); }
+}
+
+@keyframes pulseRed {
+    0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); transform: scale(1); }
+    50% { box-shadow: 0 0 0 18px rgba(231, 76, 60, 0); transform: scale(1.08); }
+    100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); transform: scale(1); }
+}
+
+.notif-with-img {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.notif-thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+#imagePreviewModal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.95);
+    z-index: 10001;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+#imagePreviewModal img {
+    max-width: 100%;
+    max-height: 90vh;
+    border-radius: 8px;
+}
+
+#imagePreviewModal .close-preview {
+    position: absolute;
+    top: 15px;
+    right: 20px;
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 28px;
+    cursor: pointer;
 }
