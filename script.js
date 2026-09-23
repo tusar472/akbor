@@ -1,14 +1,13 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getDatabase, ref, push, onValue, remove, update, set, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyDub8zDIVWzhHFN7qx4nuYdwCb1a0s3mR0",
     authDomain: "mini-f7bac.firebaseapp.com",
     databaseURL: "https://mini-f7bac-default-rtdb.firebaseio.com",
     projectId: "mini-f7bac",
-    storageBucket: "mini-f7bac.firebasestorage.app",
+    storageBucket: "mini-f7bac.appspot.com",
     messagingSenderId: "547201758346",
     appId: "1:547201758346:web:18ea0bbc8921b0d1b2e973",
     measurementId: "G-9KYTTRT5GZ"
@@ -17,7 +16,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const auth = getAuth(app);
-const storage = getStorage(app);
 
 let selectedImageData = null;
 let profilePicData = null;
@@ -45,7 +43,7 @@ let isRecording = false;
 let recordingStartTime = null;
 let recordingTimerInterval = null;
 
-// ========== রিংটন সিস্টেম (নরম সাউন্ড) ==========
+// ========== ইমু/মেসেঞ্জার স্টাইল রিংটন ==========
 let ringtoneCtx = null;
 let ringtoneOsc = null;
 let ringtoneGain = null;
@@ -64,25 +62,30 @@ function playRingtone() {
         ringtoneGain.connect(ringtoneCtx.destination);
 
         ringtoneOsc.type = 'sine';
-        ringtoneOsc.frequency.value = 520;
+        ringtoneOsc.frequency.value = 880;
         ringtoneGain.gain.value = 0;
 
         ringtoneOsc.start();
         isRingtonePlaying = true;
 
+        // ইমু/মেসেঞ্জারের মতো নরম বিপ-বিপ
         let step = 0;
         ringtoneInterval = setInterval(() => {
             if (!isRingtonePlaying) return;
-
             step++;
-            if (step % 2 === 1) {
-                ringtoneOsc.frequency.value = 520;
-                ringtoneGain.gain.setValueAtTime(0.12, ringtoneCtx.currentTime);
-                ringtoneGain.gain.exponentialRampToValueAtTime(0.01, ringtoneCtx.currentTime + 0.35);
+
+            if (step % 4 === 1) {
+                ringtoneOsc.frequency.value = 880;
+                ringtoneGain.gain.setValueAtTime(0.15, ringtoneCtx.currentTime);
+                ringtoneGain.gain.exponentialRampToValueAtTime(0.01, ringtoneCtx.currentTime + 0.2);
+            } else if (step % 4 === 2) {
+                ringtoneOsc.frequency.value = 1046;
+                ringtoneGain.gain.setValueAtTime(0.15, ringtoneCtx.currentTime);
+                ringtoneGain.gain.exponentialRampToValueAtTime(0.01, ringtoneCtx.currentTime + 0.2);
             } else {
                 ringtoneGain.gain.setValueAtTime(0.001, ringtoneCtx.currentTime);
             }
-        }, 600);
+        }, 280);
 
     } catch (e) {
         console.log("Ringtone error:", e);
@@ -152,45 +155,40 @@ const rtcConfig = {
     ]
 };
 
-// ========== ইউটিলিটি ==========
-async function uploadToStorage(file, path) {
-    try {
-        console.log("Uploading:", path);
-        const fileRef = storageRef(storage, path);
-        const snapshot = await uploadBytes(fileRef, file);
-        const url = await getDownloadURL(snapshot.ref);
-        console.log("Upload success");
-        return url;
-    } catch (error) {
-        console.error("Upload failed:", error);
-        throw new Error("আপলোড ব্যর্থ: " + error.message);
-    }
-}
-
-function compressImage(file, maxWidth = 800) {
-    return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                let width = img.width;
-                let height = img.height;
-                if (width > maxWidth) {
-                    height = Math.round((height * maxWidth) / width);
-                    width = maxWidth;
-                }
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext("2d");
-                ctx.drawImage(img, 0, 0, width, height);
-                canvas.toBlob((blob) => {
-                    resolve(new File([blob], file.name, { type: 'image/jpeg' }));
-                }, 'image/jpeg', 0.7);
+// ========== Base64 কনভার্টার ==========
+function fileToBase64(file, maxWidth = 800) {
+    return new Promise((resolve, reject) => {
+        if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
+            // ভিডিও বা অডিও সরাসরি Base64
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        } else {
+            // ছবি কম্প্রেস করে Base64
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement("canvas");
+                    let width = img.width;
+                    let height = img.height;
+                    if (width > maxWidth) {
+                        height = Math.round((height * maxWidth) / width);
+                        width = maxWidth;
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext("2d");
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL("image/jpeg", 0.7));
+                };
+                img.onerror = reject;
+                img.src = e.target.result;
             };
-            img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        }
     });
 }
 
@@ -457,12 +455,11 @@ async function uploadProfilePic(event) {
     if (!file || !user) return;
 
     try {
-        const compressed = await compressImage(file, 400);
-        const url = await uploadToStorage(compressed, `profilePics/${user.uid}_${Date.now()}.jpg`);
-        profilePicData = url;
-        await update(ref(db, 'userProfile/' + user.uid), { photo: url });
+        const base64 = await fileToBase64(file, 400);
+        profilePicData = base64;
+        await update(ref(db, 'userProfile/' + user.uid), { photo: base64 });
     } catch (err) {
-        alert("প্রোফাইল ছবি আপলোড ব্যর্থ: " + err.message);
+        alert("প্রোফাইল ছবি আপলোড ব্যর্থ");
     }
 }
 
@@ -472,11 +469,10 @@ async function uploadCoverPic(event) {
     if (!file || !user) return;
 
     try {
-        const compressed = await compressImage(file, 900);
-        const url = await uploadToStorage(compressed, `coverPhotos/${user.uid}_${Date.now()}.jpg`);
-        await update(ref(db, 'userProfile/' + user.uid), { coverPhoto: url });
+        const base64 = await fileToBase64(file, 900);
+        await update(ref(db, 'userProfile/' + user.uid), { coverPhoto: base64 });
     } catch (err) {
-        alert("কভার ছবি আপলোড ব্যর্থ: " + err.message);
+        alert("কভার ছবি আপলোড ব্যর্থ");
     }
 }
 
@@ -523,8 +519,7 @@ async function addPost() {
     try {
         let imageUrl = "";
         if (selectedImageData) {
-            const compressed = await compressImage(selectedImageData, 900);
-            imageUrl = await uploadToStorage(compressed, `posts/${user.uid}_${Date.now()}.jpg`);
+            imageUrl = await fileToBase64(selectedImageData, 900);
         }
 
         const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -546,7 +541,7 @@ async function addPost() {
         document.getElementById("previewArea").style.display = "none";
         document.getElementById("postImageInput").value = "";
     } catch (err) {
-        alert("পোস্ট করতে সমস্যা: " + err.message);
+        alert("পোস্ট করতে সমস্যা হয়েছে");
     } finally {
         btn.disabled = false;
         btn.innerText = "পোস্ট";
@@ -805,17 +800,16 @@ async function sendChatImage(e) {
     if (!file || !currentUser || !activeChatReceiverId) return;
 
     try {
-        const compressed = await compressImage(file, 800);
-        const url = await uploadToStorage(compressed, `chatImages/${currentUser.uid}_${Date.now()}.jpg`);
+        const base64 = await fileToBase64(file, 800);
         const roomId = getChatRoomId(currentUser.uid, activeChatReceiverId);
         await push(ref(db, 'chats/' + roomId), {
             sender: currentUser.uid,
-            image: url,
+            image: base64,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         });
         sendNotification(activeChatReceiverId, `${cachedUserName} আপনাকে একটি ছবি পাঠিয়েছেন।`);
     } catch (err) {
-        alert("ছবি পাঠাতে সমস্যা: " + err.message);
+        alert("ছবি পাঠাতে সমস্যা হয়েছে");
     }
     e.target.value = "";
 }
@@ -825,23 +819,23 @@ async function sendChatVideo(e) {
     const currentUser = auth.currentUser;
     if (!file || !currentUser || !activeChatReceiverId) return;
 
-    if (file.size > 25 * 1024 * 1024) {
-        alert("ভিডিও খুব বড়! সর্বোচ্চ ২৫ MB পর্যন্ত।");
+    if (file.size > 8 * 1024 * 1024) {
+        alert("ভিডিও খুব বড়! সর্বোচ্চ ৮ MB পর্যন্ত পাঠাতে পারবেন।");
         e.target.value = "";
         return;
     }
 
     try {
-        const url = await uploadToStorage(file, `chatVideos/${currentUser.uid}_${Date.now()}.mp4`);
+        const base64 = await fileToBase64(file);
         const roomId = getChatRoomId(currentUser.uid, activeChatReceiverId);
         await push(ref(db, 'chats/' + roomId), {
             sender: currentUser.uid,
-            video: url,
+            video: base64,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         });
         sendNotification(activeChatReceiverId, `${cachedUserName} আপনাকে একটি ভিডিও পাঠিয়েছেন।`);
     } catch (err) {
-        alert("ভিডিও পাঠাতে সমস্যা: " + err.message);
+        alert("ভিডিও পাঠাতে সমস্যা হয়েছে");
     }
     e.target.value = "";
 }
@@ -867,8 +861,11 @@ async function startAudioRecording() {
             if (audioChunks.length === 0) return;
 
             const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-            const file = new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' });
-            await sendAudioMessage(file);
+            const reader = new FileReader();
+            reader.onload = () => {
+                sendAudioMessage(reader.result);
+            };
+            reader.readAsDataURL(audioBlob);
         };
 
         mediaRecorder.start();
@@ -910,21 +907,20 @@ function updateRecordingTimer() {
     if (elapsed >= 60) stopAudioRecording();
 }
 
-async function sendAudioMessage(file) {
+async function sendAudioMessage(base64Audio) {
     const currentUser = auth.currentUser;
     if (!currentUser || !activeChatReceiverId) return;
 
     try {
-        const url = await uploadToStorage(file, `voiceNotes/${currentUser.uid}_${Date.now()}.webm`);
         const roomId = getChatRoomId(currentUser.uid, activeChatReceiverId);
         await push(ref(db, 'chats/' + roomId), {
             sender: currentUser.uid,
-            audio: url,
+            audio: base64Audio,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         });
         sendNotification(activeChatReceiverId, `${cachedUserName} আপনাকে একটি ভয়েস নোট পাঠিয়েছেন।`);
     } catch (err) {
-        alert("ভয়েস নোট পাঠাতে সমস্যা: " + err.message);
+        alert("ভয়েস নোট পাঠাতে সমস্যা হয়েছে");
     }
 }
 
