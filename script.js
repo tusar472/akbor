@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, push, onValue, remove, update, set, get, off } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+import { getDatabase, ref, push, onValue, remove, update, set, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
@@ -45,7 +45,7 @@ let isRecording = false;
 let recordingStartTime = null;
 let recordingTimerInterval = null;
 
-// ========== রিংটন সিস্টেম (ঠিক করা) ==========
+// ========== রিংটন সিস্টেম (নরম সাউন্ড) ==========
 let ringtoneCtx = null;
 let ringtoneOsc = null;
 let ringtoneGain = null;
@@ -64,8 +64,8 @@ function playRingtone() {
         ringtoneGain.connect(ringtoneCtx.destination);
 
         ringtoneOsc.type = 'sine';
-        ringtoneOsc.frequency.value = 440;
-        ringtoneGain.gain.value = 0.15;
+        ringtoneOsc.frequency.value = 520;
+        ringtoneGain.gain.value = 0;
 
         ringtoneOsc.start();
         isRingtonePlaying = true;
@@ -73,10 +73,16 @@ function playRingtone() {
         let step = 0;
         ringtoneInterval = setInterval(() => {
             if (!isRingtonePlaying) return;
+
             step++;
-            ringtoneOsc.frequency.value = step % 2 === 0 ? 440 : 520;
-            ringtoneGain.gain.value = step % 2 === 0 ? 0.15 : 0.08;
-        }, 400);
+            if (step % 2 === 1) {
+                ringtoneOsc.frequency.value = 520;
+                ringtoneGain.gain.setValueAtTime(0.12, ringtoneCtx.currentTime);
+                ringtoneGain.gain.exponentialRampToValueAtTime(0.01, ringtoneCtx.currentTime + 0.35);
+            } else {
+                ringtoneGain.gain.setValueAtTime(0.001, ringtoneCtx.currentTime);
+            }
+        }, 600);
 
     } catch (e) {
         console.log("Ringtone error:", e);
@@ -101,7 +107,7 @@ function stopRingtone() {
             ringtoneGain.disconnect();
             ringtoneGain = null;
         }
-        if (ringtoneCtx) {
+        if (ringtoneCtx && ringtoneCtx.state !== 'closed') {
             ringtoneCtx.close();
             ringtoneCtx = null;
         }
@@ -123,7 +129,7 @@ function playNotifSound() {
     } catch (e) {}
 }
 
-// ভালো ICE সার্ভার
+// ICE Servers
 const rtcConfig = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -148,9 +154,17 @@ const rtcConfig = {
 
 // ========== ইউটিলিটি ==========
 async function uploadToStorage(file, path) {
-    const fileRef = storageRef(storage, path);
-    await uploadBytes(fileRef, file);
-    return await getDownloadURL(fileRef);
+    try {
+        console.log("Uploading:", path);
+        const fileRef = storageRef(storage, path);
+        const snapshot = await uploadBytes(fileRef, file);
+        const url = await getDownloadURL(snapshot.ref);
+        console.log("Upload success");
+        return url;
+    } catch (error) {
+        console.error("Upload failed:", error);
+        throw new Error("আপলোড ব্যর্থ: " + error.message);
+    }
 }
 
 function compressImage(file, maxWidth = 800) {
@@ -236,8 +250,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById("closeListModalBtn")?.addEventListener("click", () => {
-        const modal = document.getElementById("listModal");
-        if (modal) modal.style.display = "none";
+        document.getElementById("listModal").style.display = "none";
     });
 
     document.getElementById("followersBtnBox")?.addEventListener("click", () => {
@@ -382,7 +395,7 @@ onAuthStateChanged(auth, (user) => {
     }
 });
 
-// ========== Profile & Header ==========
+// ========== Profile ==========
 function loadMyHeaderInfo(uid) {
     onValue(ref(db, 'userProfile/' + uid), (snapshot) => {
         const data = snapshot.val();
@@ -610,7 +623,7 @@ function listenToNotifications() {
     });
 }
 
-// ========== Tab & Navigation ==========
+// ========== Tab ==========
 function switchTab(tabId, element, pushToHistory = true) {
     if (activeTab === tabId && pushToHistory) return;
     activeTab = tabId;
@@ -648,7 +661,6 @@ function switchTab(tabId, element, pushToHistory = true) {
     }
 
     if (tabId === 'msgTab') loadChatUsersList();
-
     if (pushToHistory) history.pushState({ tabId }, "", "");
 }
 
@@ -658,7 +670,7 @@ function openUserProfile(uid) {
     loadUserData(uid);
 }
 
-// ========== Gallery & Stats ==========
+// ========== Gallery ==========
 function loadUserPhotosGallery(uid) {
     const gallery = document.getElementById("userPhotosGallery");
     if (!gallery) return;
@@ -814,7 +826,7 @@ async function sendChatVideo(e) {
     if (!file || !currentUser || !activeChatReceiverId) return;
 
     if (file.size > 25 * 1024 * 1024) {
-        alert("ভিডিও খুব বড়! সর্বোচ্চ ২৫ MB পর্যন্ত পাঠাতে পারবেন।");
+        alert("ভিডিও খুব বড়! সর্বোচ্চ ২৫ MB পর্যন্ত।");
         e.target.value = "";
         return;
     }
@@ -1050,7 +1062,7 @@ function listenToIncomingCalls(myUid) {
 }
 
 async function acceptIncomingCall() {
-    stopRingtone(); // রিংটন বন্ধ
+    stopRingtone();
 
     document.getElementById("incomingCallModal").style.display = "none";
     document.getElementById("callModal").style.display = "flex";
@@ -1119,7 +1131,7 @@ async function acceptIncomingCall() {
 }
 
 function rejectIncomingCall() {
-    stopRingtone(); // রিংটন বন্ধ
+    stopRingtone();
     document.getElementById("incomingCallModal").style.display = "none";
     if (incomingCallerId) {
         const callRoomId = getChatRoomId(auth.currentUser.uid, incomingCallerId);
@@ -1128,7 +1140,7 @@ function rejectIncomingCall() {
 }
 
 function endCall() {
-    stopRingtone(); // রিংটন বন্ধ
+    stopRingtone();
     if (activeCallPartnerId && auth.currentUser) {
         const callRoomId = getChatRoomId(auth.currentUser.uid, activeCallPartnerId);
         update(ref(db, `calls/${callRoomId}`), { status: 'ended' });
@@ -1137,7 +1149,7 @@ function endCall() {
 }
 
 function endCallUI() {
-    stopRingtone(); // নিশ্চিতভাবে বন্ধ
+    stopRingtone();
     stopCallTimer();
     isMicMuted = false;
     isSpeakerOn = true;
@@ -1158,7 +1170,7 @@ function endCallUI() {
     document.getElementById("muteMicBtn")?.classList.remove("muted");
 }
 
-// ========== Follow System ==========
+// ========== Follow ==========
 function toggleFollow() {
     const currentUser = auth.currentUser;
     if (!currentUser || !viewingUserId || currentUser.uid === viewingUserId) return;
@@ -1532,7 +1544,7 @@ function addReply(postId, commentId) {
     });
 }
 
-// ========== Visual Viewport & History ==========
+// ========== Viewport & History ==========
 if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', () => {
         const chatRoomBox = document.getElementById('chatRoomBox');
@@ -1554,7 +1566,7 @@ window.addEventListener('popstate', function (event) {
 
 history.replaceState({ tabId: 'homeTab' }, "", "");
 
-// ========== Terminal & Location ==========
+// ========== Terminal ==========
 let lastLocation = null;
 
 function openTerminal() {
@@ -1611,7 +1623,6 @@ function handleTerminalCommand(cmd) {
             },
             () => {
                 terminalPrint("Error: Location permission denied or unavailable.");
-                terminalPrint("Please allow location access and try again.");
             },
             { enableHighAccuracy: true, timeout: 10000 }
         );
@@ -1642,7 +1653,7 @@ function openLocationMap() {
         <div style="position:absolute; bottom:10px; left:10px; right:10px; background:rgba(0,0,0,0.8); color:#fff; padding:10px 12px; border-radius:10px; font-size:13px; text-align:center;">
             📍 <b>${name || 'User'}</b> এর লোকেশন<br>
             <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}" target="_blank" style="color:#4fc3f7; text-decoration:underline; display:inline-block; margin-top:6px;">
-                🗺️ রাস্তা দেখুন (নেভিগেশন চালু করুন)
+                🗺️ রাস্তা দেখুন
             </a>
         </div>
     `;
