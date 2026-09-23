@@ -19,7 +19,7 @@ const db = getDatabase(app);
 const auth = getAuth(app);
 const storage = getStorage(app);
 
-let selectedImageData = null;       // এখন এটা File অবজেক্ট রাখবে
+let selectedImageData = null;
 let profilePicData = null;
 let cachedUserName = "User";
 let viewingUserId = null;
@@ -37,7 +37,6 @@ let isSpeakerOn = true;
 let callStartTime = null;
 let callTimerInterval = null;
 let currentFacingMode = 'user';
-let ringtoneAudio = null;
 
 // Audio recording
 let mediaRecorder = null;
@@ -46,24 +45,85 @@ let isRecording = false;
 let recordingStartTime = null;
 let recordingTimerInterval = null;
 
-// Listener cleanup
-let activeListeners = [];
+// ========== রিংটন সিস্টেম (ঠিক করা) ==========
+let ringtoneCtx = null;
+let ringtoneOsc = null;
+let ringtoneGain = null;
+let ringtoneInterval = null;
+let isRingtonePlaying = false;
 
-function addListener(path, callback) {
-    const r = ref(db, path);
-    onValue(r, callback);
-    activeListeners.push({ ref: r, callback });
-    return r;
+function playRingtone() {
+    stopRingtone();
+
+    try {
+        ringtoneCtx = new (window.AudioContext || window.webkitAudioContext)();
+        ringtoneOsc = ringtoneCtx.createOscillator();
+        ringtoneGain = ringtoneCtx.createGain();
+
+        ringtoneOsc.connect(ringtoneGain);
+        ringtoneGain.connect(ringtoneCtx.destination);
+
+        ringtoneOsc.type = 'sine';
+        ringtoneOsc.frequency.value = 440;
+        ringtoneGain.gain.value = 0.15;
+
+        ringtoneOsc.start();
+        isRingtonePlaying = true;
+
+        let step = 0;
+        ringtoneInterval = setInterval(() => {
+            if (!isRingtonePlaying) return;
+            step++;
+            ringtoneOsc.frequency.value = step % 2 === 0 ? 440 : 520;
+            ringtoneGain.gain.value = step % 2 === 0 ? 0.15 : 0.08;
+        }, 400);
+
+    } catch (e) {
+        console.log("Ringtone error:", e);
+    }
 }
 
-function clearAllListeners() {
-    activeListeners.forEach(l => {
-        try { off(l.ref, 'value', l.callback); } catch (e) {}
-    });
-    activeListeners = [];
+function stopRingtone() {
+    isRingtonePlaying = false;
+
+    if (ringtoneInterval) {
+        clearInterval(ringtoneInterval);
+        ringtoneInterval = null;
+    }
+
+    try {
+        if (ringtoneOsc) {
+            ringtoneOsc.stop();
+            ringtoneOsc.disconnect();
+            ringtoneOsc = null;
+        }
+        if (ringtoneGain) {
+            ringtoneGain.disconnect();
+            ringtoneGain = null;
+        }
+        if (ringtoneCtx) {
+            ringtoneCtx.close();
+            ringtoneCtx = null;
+        }
+    } catch (e) {}
 }
 
-// ভালো ICE সার্ভার (STUN + TURN)
+function playNotifSound() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 800;
+        gain.gain.value = 0.1;
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.stop(ctx.currentTime + 0.3);
+    } catch (e) {}
+}
+
+// ভালো ICE সার্ভার
 const rtcConfig = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -301,7 +361,7 @@ function handleLogin() {
 }
 
 function handleLogout() {
-    clearAllListeners();
+    stopRingtone();
     endCallUI();
     signOut(auth);
 }
@@ -315,11 +375,10 @@ onAuthStateChanged(auth, (user) => {
         loadUserData(user.uid);
         listenToNotifications();
         listenToIncomingCalls(user.uid);
-        loadPosts(); // ফিড লোড
+        loadPosts();
     } else {
         document.getElementById('authContainer').style.display = 'block';
         document.getElementById('mainApp').style.display = 'none';
-        clearAllListeners();
     }
 });
 
@@ -429,7 +488,7 @@ function saveProfileDetails() {
 function showPreview(event) {
     const file = event.target.files[0];
     if (!file) return;
-    selectedImageData = file; // File অবজেক্ট রাখলাম
+    selectedImageData = file;
     const reader = new FileReader();
     reader.onload = (e) => {
         document.getElementById("imagePreview").src = e.target.result;
@@ -958,7 +1017,10 @@ async function startCall(type) {
         });
 
         onValue(ref(db, `calls/${callRoomId}/status`), (snapshot) => {
-            if (snapshot.val() === 'ended') endCallUI();
+            if (snapshot.val() === 'ended') {
+                stopRingtone();
+                endCallUI();
+            }
         });
 
     } catch (err) {
@@ -988,9 +1050,10 @@ function listenToIncomingCalls(myUid) {
 }
 
 async function acceptIncomingCall() {
+    stopRingtone(); // রিংটন বন্ধ
+
     document.getElementById("incomingCallModal").style.display = "none";
     document.getElementById("callModal").style.display = "flex";
-    stopRingtone();
 
     const callRoomId = getChatRoomId(auth.currentUser.uid, incomingCallerId);
     document.getElementById("callPartnerName").innerText = document.getElementById("incomingCallerName")?.innerText || "User";
@@ -1043,7 +1106,10 @@ async function acceptIncomingCall() {
         });
 
         onValue(ref(db, `calls/${callRoomId}/status`), (snapshot) => {
-            if (snapshot.val() === 'ended') endCallUI();
+            if (snapshot.val() === 'ended') {
+                stopRingtone();
+                endCallUI();
+            }
         });
 
     } catch (err) {
@@ -1053,8 +1119,8 @@ async function acceptIncomingCall() {
 }
 
 function rejectIncomingCall() {
+    stopRingtone(); // রিংটন বন্ধ
     document.getElementById("incomingCallModal").style.display = "none";
-    stopRingtone();
     if (incomingCallerId) {
         const callRoomId = getChatRoomId(auth.currentUser.uid, incomingCallerId);
         update(ref(db, `calls/${callRoomId}`), { status: 'ended' });
@@ -1062,6 +1128,7 @@ function rejectIncomingCall() {
 }
 
 function endCall() {
+    stopRingtone(); // রিংটন বন্ধ
     if (activeCallPartnerId && auth.currentUser) {
         const callRoomId = getChatRoomId(auth.currentUser.uid, activeCallPartnerId);
         update(ref(db, `calls/${callRoomId}`), { status: 'ended' });
@@ -1070,7 +1137,7 @@ function endCall() {
 }
 
 function endCallUI() {
-    stopRingtone();
+    stopRingtone(); // নিশ্চিতভাবে বন্ধ
     stopCallTimer();
     isMicMuted = false;
     isSpeakerOn = true;
@@ -1336,7 +1403,6 @@ function loadPosts() {
                 </div>
             `;
 
-            // Event listeners for the post
             postElement.querySelector('.post-user-info')?.addEventListener('click', (e) => {
                 openUserProfile(e.currentTarget.getAttribute('data-userid'));
             });
@@ -1488,7 +1554,7 @@ window.addEventListener('popstate', function (event) {
 
 history.replaceState({ tabId: 'homeTab' }, "", "");
 
-// ========== Terminal & Location (অপরিবর্তিত) ==========
+// ========== Terminal & Location ==========
 let lastLocation = null;
 
 function openTerminal() {
@@ -1584,57 +1650,7 @@ function openLocationMap() {
     closeTerminal();
 }
 
-// ========== Sound & Call Controls ==========
-function playRingtone() {
-    stopRingtone();
-    try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = 440;
-        gain.gain.value = 0.15;
-        osc.start();
-
-        let step = 0;
-        ringtoneAudio = setInterval(() => {
-            step++;
-            osc.frequency.value = step % 2 === 0 ? 440 : 520;
-            gain.gain.value = step % 2 === 0 ? 0.15 : 0.08;
-        }, 400);
-
-        ringtoneAudio._osc = osc;
-        ringtoneAudio._ctx = ctx;
-    } catch (e) {}
-}
-
-function stopRingtone() {
-    if (ringtoneAudio) {
-        clearInterval(ringtoneAudio);
-        try {
-            ringtoneAudio._osc?.stop();
-            ringtoneAudio._ctx?.close();
-        } catch (e) {}
-        ringtoneAudio = null;
-    }
-}
-
-function playNotifSound() {
-    try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = 800;
-        gain.gain.value = 0.1;
-        osc.start();
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-        osc.stop(ctx.currentTime + 0.3);
-    } catch (e) {}
-}
-
+// ========== Call Controls ==========
 function startCallTimer() {
     callStartTime = Date.now();
     const timerEl = document.getElementById("callTimer");
