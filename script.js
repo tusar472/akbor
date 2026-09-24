@@ -68,7 +68,6 @@ function playRingtone() {
         ringtoneOsc.start();
         isRingtonePlaying = true;
 
-        // ইমু/মেসেঞ্জারের মতো নরম বিপ-বিপ
         let step = 0;
         ringtoneInterval = setInterval(() => {
             if (!isRingtonePlaying) return;
@@ -159,13 +158,11 @@ const rtcConfig = {
 function fileToBase64(file, maxWidth = 800) {
     return new Promise((resolve, reject) => {
         if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
-            // ভিডিও বা অডিও সরাসরি Base64
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result);
             reader.onerror = reject;
             reader.readAsDataURL(file);
         } else {
-            // ছবি কম্প্রেস করে Base64
             const reader = new FileReader();
             reader.onload = (e) => {
                 const img = new Image();
@@ -840,7 +837,7 @@ async function sendChatVideo(e) {
     e.target.value = "";
 }
 
-// Audio Recording
+// ========== Audio Recording (নয়েজ কমানো হয়েছে) ==========
 async function toggleAudioRecording() {
     if (isRecording) stopAudioRecording();
     else startAudioRecording();
@@ -848,7 +845,16 @@ async function toggleAudioRecording() {
 
 async function startAudioRecording() {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1,
+                sampleRate: 16000
+            }
+        });
+
         mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
         audioChunks = [];
 
@@ -970,7 +976,7 @@ async function startCall(type) {
 
     try {
         localStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true },
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
             video: type === 'video' ? { facingMode: currentFacingMode } : false
         });
 
@@ -1068,7 +1074,7 @@ async function acceptIncomingCall() {
 
     try {
         localStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true },
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
             video: currentCallType === 'video' ? { facingMode: currentFacingMode } : false
         });
 
