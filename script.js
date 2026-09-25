@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, push, onValue, remove, update, set, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+import { getDatabase, ref, push, onValue, remove, update, set, get, off } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 const firebaseConfig = {
@@ -35,6 +35,7 @@ let isSpeakerOn = true;
 let callStartTime = null;
 let callTimerInterval = null;
 let currentFacingMode = 'user';
+let currentCallRoomId = null;
 
 // Audio recording
 let mediaRecorder = null;
@@ -838,7 +839,7 @@ function listenToMessages(receiverUid) {
     });
 }
 
-// ==================== IMPROVED CALL SYSTEM ====================
+// ==================== NEW RELIABLE CALL SYSTEM ====================
 async function startCall(type) {
     if (!activeChatReceiverId) {
         alert("আগে চ্যাট খুলুন");
@@ -848,10 +849,12 @@ async function startCall(type) {
     currentCallType = type;
     activeCallPartnerId = activeChatReceiverId;
     const myUid = auth.currentUser.uid;
-    const callRoomId = getChatRoomId(myUid, activeCallPartnerId);
+    currentCallRoomId = getChatRoomId(myUid, activeCallPartnerId);
 
+    // পুরনো ডাটা মুছে ফেলা
     try {
-        await set(ref(db, `calls/${callRoomId}`), null);
+        await set(ref(db, `calls/${currentCallRoomId}`), null);
+        await set(ref(db, `incomingCalls/${activeCallPartnerId}`), null);
     } catch (e) {}
 
     document.getElementById("callModal").style.display = "flex";
@@ -886,27 +889,36 @@ async function startCall(type) {
 
         peerConnection.onicecandidate = (e) => {
             if (e.candidate) {
-                push(ref(db, `calls/${callRoomId}/senderCandidates`), e.candidate.toJSON());
+                push(ref(db, `calls/${currentCallRoomId}/senderCandidates`), e.candidate.toJSON());
             }
         };
 
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
 
-        await set(ref(db, `calls/${callRoomId}`), {
+        // মূল কল ডাটা
+        await set(ref(db, `calls/${currentCallRoomId}`), {
             type: type,
             caller: myUid,
             callerName: cachedUserName,
             receiver: activeCallPartnerId,
-            offer: {
-                type: offer.type,
-                sdp: offer.sdp
-            },
+            offer: { type: offer.type, sdp: offer.sdp },
             status: "ringing",
             timestamp: Date.now()
         });
 
-        onValue(ref(db, `calls/${callRoomId}/answer`), async (snapshot) => {
+        // রিসিভারের জন্য আলাদা নোটিফিকেশন পাথ (এটাই মূল পরিবর্তন)
+        await set(ref(db, `incomingCalls/${activeCallPartnerId}`), {
+            caller: myUid,
+            callerName: cachedUserName,
+            type: type,
+            roomId: currentCallRoomId,
+            status: "ringing",
+            timestamp: Date.now()
+        });
+
+        // Answer শোনা
+        onValue(ref(db, `calls/${currentCallRoomId}/answer`), async (snapshot) => {
             const answer = snapshot.val();
             if (answer && peerConnection && !peerConnection.currentRemoteDescription) {
                 try {
@@ -917,7 +929,8 @@ async function startCall(type) {
             }
         });
 
-        onValue(ref(db, `calls/${callRoomId}/receiverCandidates`), (snapshot) => {
+        // Receiver ICE
+        onValue(ref(db, `calls/${currentCallRoomId}/receiverCandidates`), (snapshot) => {
             if (snapshot.exists() && peerConnection) {
                 Object.values(snapshot.val()).forEach(cand => {
                     peerConnection.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
@@ -925,7 +938,8 @@ async function startCall(type) {
             }
         });
 
-        onValue(ref(db, `calls/${callRoomId}/status`), (snapshot) => {
+        // Status
+        onValue(ref(db, `calls/${currentCallRoomId}/status`), (snapshot) => {
             const status = snapshot.val();
             if (status === "ended" || status === "rejected") {
                 stopRingtone();
@@ -941,35 +955,30 @@ async function startCall(type) {
 }
 
 function listenToIncomingCalls(myUid) {
-    onValue(ref(db, 'calls'), (snapshot) => {
+    // পুরনো লিসেনার বন্ধ করে নতুন করে লাগানো
+    const incomingRef = ref(db, `incomingCalls/${myUid}`);
+    
+    onValue(incomingRef, (snapshot) => {
         if (!snapshot.exists()) return;
 
-        const calls = snapshot.val();
+        const call = snapshot.val();
+        if (!call || call.status !== "ringing") return;
+
+        const modal = document.getElementById("incomingCallModal");
+        if (!modal) return;
+        if (modal.style.display === "flex") return;
+
+        incomingCallerId = call.caller;
+        activeCallPartnerId = call.caller;
+        currentCallType = call.type || "audio";
+        currentCallRoomId = call.roomId;
+
+        document.getElementById("incomingCallerName").innerText = call.callerName || "Someone";
+        document.getElementById("incomingCallType").innerText = 
+            (call.type === "video") ? "ভিডিও কল আসছে..." : "অডিও কল আসছে...";
         
-        Object.keys(calls).forEach(roomId => {
-            const call = calls[roomId];
-            
-            if (!call) return;
-            
-            if (call.receiver === myUid && call.status === "ringing") {
-                
-                const modal = document.getElementById("incomingCallModal");
-                if (!modal) return;
-                
-                if (modal.style.display === "flex") return;
-
-                incomingCallerId = call.caller;
-                activeCallPartnerId = call.caller;
-                currentCallType = call.type || "audio";
-
-                document.getElementById("incomingCallerName").innerText = call.callerName || "Someone";
-                document.getElementById("incomingCallType").innerText = 
-                    (call.type === "video") ? "ভিডিও কল আসছে..." : "অডিও কল আসছে...";
-                
-                modal.style.display = "flex";
-                playRingtone();
-            }
-        });
+        modal.style.display = "flex";
+        playRingtone();
     });
 }
 
@@ -982,10 +991,15 @@ async function acceptIncomingCall() {
     document.getElementById("callModal").style.display = "flex";
 
     const myUid = auth.currentUser.uid;
-    const callRoomId = getChatRoomId(myUid, incomingCallerId);
+    const roomId = currentCallRoomId || getChatRoomId(myUid, incomingCallerId);
     
     document.getElementById("callPartnerName").innerText = 
         document.getElementById("incomingCallerName")?.innerText || "User";
+
+    // incomingCalls থেকে মুছে ফেলা
+    try {
+        await set(ref(db, `incomingCalls/${myUid}`), null);
+    } catch (e) {}
 
     try {
         localStream = await navigator.mediaDevices.getUserMedia({
@@ -1014,11 +1028,11 @@ async function acceptIncomingCall() {
 
         peerConnection.onicecandidate = (e) => {
             if (e.candidate) {
-                push(ref(db, `calls/${callRoomId}/receiverCandidates`), e.candidate.toJSON());
+                push(ref(db, `calls/${roomId}/receiverCandidates`), e.candidate.toJSON());
             }
         };
 
-        const callSnap = await get(ref(db, `calls/${callRoomId}`));
+        const callSnap = await get(ref(db, `calls/${roomId}`));
         const callData = callSnap.val();
 
         if (callData && callData.offer) {
@@ -1027,18 +1041,15 @@ async function acceptIncomingCall() {
             const answer = await peerConnection.createAnswer();
             await peerConnection.setLocalDescription(answer);
 
-            await update(ref(db, `calls/${callRoomId}`), {
-                answer: {
-                    type: answer.type,
-                    sdp: answer.sdp
-                },
+            await update(ref(db, `calls/${roomId}`), {
+                answer: { type: answer.type, sdp: answer.sdp },
                 status: "connected"
             });
 
             startCallTimer();
         }
 
-        onValue(ref(db, `calls/${callRoomId}/senderCandidates`), (snapshot) => {
+        onValue(ref(db, `calls/${roomId}/senderCandidates`), (snapshot) => {
             if (snapshot.exists() && peerConnection) {
                 Object.values(snapshot.val()).forEach(cand => {
                     peerConnection.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
@@ -1046,7 +1057,7 @@ async function acceptIncomingCall() {
             }
         });
 
-        onValue(ref(db, `calls/${callRoomId}/status`), (snapshot) => {
+        onValue(ref(db, `calls/${roomId}/status`), (snapshot) => {
             if (snapshot.val() === "ended") {
                 stopRingtone();
                 endCallUI();
@@ -1065,19 +1076,28 @@ function rejectIncomingCall() {
     const modal = document.getElementById("incomingCallModal");
     if (modal) modal.style.display = "none";
     
-    if (incomingCallerId && auth.currentUser) {
-        const callRoomId = getChatRoomId(auth.currentUser.uid, incomingCallerId);
-        update(ref(db, `calls/${callRoomId}`), { status: "rejected" });
+    const myUid = auth.currentUser?.uid;
+    if (myUid) {
+        set(ref(db, `incomingCalls/${myUid}`), null);
+    }
+    
+    if (incomingCallerId && myUid) {
+        const roomId = currentCallRoomId || getChatRoomId(myUid, incomingCallerId);
+        update(ref(db, `calls/${roomId}`), { status: "rejected" });
     }
     incomingCallerId = null;
+    currentCallRoomId = null;
 }
 
 function endCall() {
     stopRingtone();
     
-    if (activeCallPartnerId && auth.currentUser) {
-        const callRoomId = getChatRoomId(auth.currentUser.uid, activeCallPartnerId);
-        update(ref(db, `calls/${callRoomId}`), { status: "ended" });
+    const myUid = auth.currentUser?.uid;
+    if (activeCallPartnerId && myUid) {
+        const roomId = currentCallRoomId || getChatRoomId(myUid, activeCallPartnerId);
+        update(ref(db, `calls/${roomId}`), { status: "ended" });
+        // রিসিভারের incomingCalls মুছে ফেলা
+        set(ref(db, `incomingCalls/${activeCallPartnerId}`), null);
     }
     endCallUI();
 }
@@ -1091,6 +1111,7 @@ function endCallUI() {
     currentFacingMode = "user";
     incomingCallerId = null;
     activeCallPartnerId = null;
+    currentCallRoomId = null;
 
     if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
