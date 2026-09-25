@@ -1,6 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getDatabase, ref, push, onValue, remove, update, set, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyDub8zDIVWzhHFN7qx4nuYdwCb1a0s3mR0",
@@ -16,6 +17,10 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const auth = getAuth(app);
+const messaging = getMessaging(app);
+
+// VAPID Key (তোমার দেওয়া)
+const vapidKey = "BM8QATiLVpiFY-OwYuWTRhmDkr-ReVooiYMCOM77LVWEDWwSoYf6TJ_ikJs1JYAxEz9rHOlvrlebIi5XHINDjLk";
 
 let selectedImageData = null;
 let profilePicData = null;
@@ -43,7 +48,7 @@ let isRecording = false;
 let recordingStartTime = null;
 let recordingTimerInterval = null;
 
-// ========== ইমু/মেসেঞ্জার স্টাইল রিংটন ==========
+// ========== রিংটন (ইমু/মেসেঞ্জার স্টাইল) ==========
 let ringtoneCtx = null;
 let ringtoneOsc = null;
 let ringtoneGain = null;
@@ -52,19 +57,15 @@ let isRingtonePlaying = false;
 
 function playRingtone() {
     stopRingtone();
-
     try {
         ringtoneCtx = new (window.AudioContext || window.webkitAudioContext)();
         ringtoneOsc = ringtoneCtx.createOscillator();
         ringtoneGain = ringtoneCtx.createGain();
-
         ringtoneOsc.connect(ringtoneGain);
         ringtoneGain.connect(ringtoneCtx.destination);
-
         ringtoneOsc.type = 'sine';
         ringtoneOsc.frequency.value = 880;
         ringtoneGain.gain.value = 0;
-
         ringtoneOsc.start();
         isRingtonePlaying = true;
 
@@ -72,7 +73,6 @@ function playRingtone() {
         ringtoneInterval = setInterval(() => {
             if (!isRingtonePlaying) return;
             step++;
-
             if (step % 4 === 1) {
                 ringtoneOsc.frequency.value = 880;
                 ringtoneGain.gain.setValueAtTime(0.15, ringtoneCtx.currentTime);
@@ -85,7 +85,6 @@ function playRingtone() {
                 ringtoneGain.gain.setValueAtTime(0.001, ringtoneCtx.currentTime);
             }
         }, 280);
-
     } catch (e) {
         console.log("Ringtone error:", e);
     }
@@ -93,12 +92,10 @@ function playRingtone() {
 
 function stopRingtone() {
     isRingtonePlaying = false;
-
     if (ringtoneInterval) {
         clearInterval(ringtoneInterval);
         ringtoneInterval = null;
     }
-
     try {
         if (ringtoneOsc) {
             ringtoneOsc.stop();
@@ -136,25 +133,13 @@ const rtcConfig = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-        },
-        {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-        },
-        {
-            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-        }
+        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
     ]
 };
 
-// ========== Base64 কনভার্টার ==========
+// ========== Base64 ==========
 function fileToBase64(file, maxWidth = 800) {
     return new Promise((resolve, reject) => {
         if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
@@ -189,18 +174,28 @@ function fileToBase64(file, maxWidth = 800) {
     });
 }
 
+// ========== FCM Token ==========
+async function requestNotificationPermission() {
+    try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+            const token = await getToken(messaging, { vapidKey });
+            if (token && auth.currentUser) {
+                await update(ref(db, 'userProfile/' + auth.currentUser.uid), { fcmToken: token });
+                console.log("FCM Token saved");
+            }
+        }
+    } catch (err) {
+        console.log("Notification permission error:", err);
+    }
+}
+
 // ========== Event Listeners ==========
 document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("loginBtn")?.addEventListener("click", handleLogin);
     document.getElementById("signupBtn")?.addEventListener("click", handleSignup);
-    document.getElementById("toSignupLink")?.addEventListener("click", (e) => {
-        e.preventDefault();
-        toggleAuth('signup');
-    });
-    document.getElementById("toLoginLink")?.addEventListener("click", (e) => {
-        e.preventDefault();
-        toggleAuth('login');
-    });
+    document.getElementById("toSignupLink")?.addEventListener("click", (e) => { e.preventDefault(); toggleAuth('signup'); });
+    document.getElementById("toLoginLink")?.addEventListener("click", (e) => { e.preventDefault(); toggleAuth('login'); });
 
     document.getElementById("btnHomeTab")?.addEventListener("click", function () { switchTab('homeTab', this); });
     document.getElementById("btnProfileTab")?.addEventListener("click", function () { switchTab('profileTab', this); });
@@ -259,13 +254,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (chatInputText) {
         chatInputText.addEventListener('focus', () => {
             setTimeout(() => {
-                const messageDisplayArea = document.getElementById('messageDisplayArea');
-                if (messageDisplayArea) messageDisplayArea.scrollTop = messageDisplayArea.scrollHeight;
+                const area = document.getElementById('messageDisplayArea');
+                if (area) area.scrollTop = area.scrollHeight;
             }, 300);
         });
-        chatInputText.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendDirectMessage();
-        });
+        chatInputText.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendDirectMessage(); });
         chatInputText.addEventListener('input', toggleMicSendButton);
     }
 
@@ -291,7 +284,6 @@ function toggleMicSendButton() {
     const micBtn = document.getElementById('recordAudioBtn');
     const sendBtn = document.getElementById('sendChatMsgBtn');
     if (!input || !micBtn || !sendBtn) return;
-
     if (input.value.trim().length > 0) {
         micBtn.style.display = 'none';
         sendBtn.style.display = 'flex';
@@ -304,40 +296,26 @@ function toggleMicSendButton() {
 function handleChatAttach(e) {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.type.startsWith('video/')) {
-        sendChatVideo(e);
-    } else {
-        sendChatImage(e);
-    }
+    if (file.type.startsWith('video/')) sendChatVideo(e);
+    else sendChatImage(e);
 }
 
 document.addEventListener("click", function (e) {
     if (!e.target.classList.contains("more-btn")) {
         document.querySelectorAll(".menu-popup").forEach(menu => menu.style.display = "none");
     }
-    const searchInput = document.getElementById("userSearchInput");
-    const resultsContainer = document.getElementById("searchResults");
-    if (resultsContainer && searchInput && !searchInput.contains(e.target) && !resultsContainer.contains(e.target)) {
-        resultsContainer.style.display = "none";
-    }
 });
 
 // ========== Auth ==========
 function toggleAuth(type) {
-    if (type === 'signup') {
-        document.getElementById('loginForm').style.display = 'none';
-        document.getElementById('signupForm').style.display = 'block';
-    } else {
-        document.getElementById('signupForm').style.display = 'none';
-        document.getElementById('loginForm').style.display = 'block';
-    }
+    document.getElementById('loginForm').style.display = type === 'signup' ? 'none' : 'block';
+    document.getElementById('signupForm').style.display = type === 'signup' ? 'block' : 'none';
 }
 
 function handleSignup() {
     const name = document.getElementById('signupName')?.value.trim() || "";
     const email = document.getElementById('signupEmail')?.value.trim() || "";
     const password = document.getElementById('signupPassword')?.value || "";
-
     if (!name || !email || !password) return alert("দয়া করে সব ঘর পূরণ করুন!");
     if (password.length < 6) return alert("পাসওয়ার্ড অন্তত ৬ অক্ষরের হতে হবে!");
 
@@ -347,9 +325,7 @@ function handleSignup() {
             cachedUserName = name;
             set(ref(db, 'userProfile/' + user.uid), { name, email }).then(() => {
                 alert("একাউন্ট তৈরি সফল হয়েছে!");
-                document.getElementById('signupName').value = '';
-                document.getElementById('signupEmail').value = '';
-                document.getElementById('signupPassword').value = '';
+                requestNotificationPermission();
             });
         })
         .catch((error) => alert("সাইনআপ সমস্যা: " + error.message));
@@ -361,10 +337,7 @@ function handleLogin() {
     if (!email || !password) return alert("ইমেইল এবং পাসওয়ার্ড দিন!");
 
     signInWithEmailAndPassword(auth, email, password)
-        .then(() => {
-            document.getElementById('loginEmail').value = '';
-            document.getElementById('loginPassword').value = '';
-        })
+        .then(() => requestNotificationPermission())
         .catch((error) => alert("লগইন ভুল হয়েছে: " + error.message));
 }
 
@@ -384,6 +357,7 @@ onAuthStateChanged(auth, (user) => {
         listenToNotifications();
         listenToIncomingCalls(user.uid);
         loadPosts();
+        requestNotificationPermission();
     } else {
         document.getElementById('authContainer').style.display = 'block';
         document.getElementById('mainApp').style.display = 'none';
@@ -410,7 +384,7 @@ function loadUserData(uid) {
     if (!uid) return;
     viewingUserId = uid;
     const currentUser = auth.currentUser;
-    const isMyProfile = currentUser && (currentUser.uid === uid);
+    const isMyProfile = currentUser && currentUser.uid === uid;
 
     document.getElementById('settingsBtn').style.display = isMyProfile ? 'inline-block' : 'none';
     document.getElementById('coverBtnLabel').style.display = isMyProfile ? 'inline-block' : 'none';
@@ -419,7 +393,6 @@ function loadUserData(uid) {
     onValue(ref(db, 'userProfile/' + uid), (snapshot) => {
         const data = snapshot.val() || {};
         const name = data.name || "User";
-
         document.getElementById('displayProfileName').innerText = name;
         document.getElementById('profName').value = name;
         document.getElementById('profLocation').value = data.location || "";
@@ -437,7 +410,6 @@ function loadUserData(uid) {
         avatarDisplay.innerHTML = data.photo
             ? `<img src="${data.photo}" style="width:100%; height:100%; object-fit:cover;">`
             : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:28px; background:#ccc; color:#555;">${(name[0] || 'U').toUpperCase()}</div>`;
-
         document.getElementById("coverImageDisplay").src = data.coverPhoto || "";
     });
 
@@ -450,7 +422,6 @@ async function uploadProfilePic(event) {
     const user = auth.currentUser;
     const file = event.target.files[0];
     if (!file || !user) return;
-
     try {
         const base64 = await fileToBase64(file, 400);
         profilePicData = base64;
@@ -464,7 +435,6 @@ async function uploadCoverPic(event) {
     const user = auth.currentUser;
     const file = event.target.files[0];
     if (!file || !user) return;
-
     try {
         const base64 = await fileToBase64(file, 900);
         await update(ref(db, 'userProfile/' + user.uid), { coverPhoto: base64 });
@@ -477,7 +447,6 @@ function saveProfileDetails() {
     const user = auth.currentUser;
     if (!user) return;
     const newName = document.getElementById('profName')?.value.trim() || cachedUserName;
-
     update(ref(db, 'userProfile/' + user.uid), {
         name: newName,
         location: document.getElementById('profLocation')?.value.trim() || "",
@@ -515,9 +484,7 @@ async function addPost() {
 
     try {
         let imageUrl = "";
-        if (selectedImageData) {
-            imageUrl = await fileToBase64(selectedImageData, 900);
-        }
+        if (selectedImageData) imageUrl = await fileToBase64(selectedImageData, 900);
 
         const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const userSnap = await get(ref(db, 'userProfile/' + user.uid));
@@ -554,7 +521,6 @@ function toggleSettingsModal() {
 function sendNotification(targetUserId, text, imageUrl = null) {
     const currentUser = auth.currentUser;
     if (!targetUserId || !currentUser || currentUser.uid === targetUserId) return;
-
     const notifData = {
         text,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -569,12 +535,10 @@ function sendNotification(targetUserId, text, imageUrl = null) {
 function listenToNotifications() {
     const currentUser = auth.currentUser;
     if (!currentUser) return;
-
     onValue(ref(db, 'notifications/' + currentUser.uid), (snapshot) => {
         const notifContainer = document.getElementById("notifContainer");
         const badge = document.getElementById("notifBadge");
         if (!notifContainer) return;
-
         notifContainer.innerHTML = "";
         const data = snapshot.val();
         if (!data) {
@@ -582,27 +546,18 @@ function listenToNotifications() {
             notifContainer.innerHTML = "<div style='padding:15px; text-align:center; color:gray;'>কোনো নোটিফিকেশন নেই</div>";
             return;
         }
-
         const notifArray = Object.values(data);
         const unreadCount = notifArray.filter(n => n.read === false).length;
-
         if (badge && activeTab !== 'notifTab') {
             badge.innerText = unreadCount;
             badge.style.display = unreadCount > 0 ? "inline-block" : "none";
         }
-
         notifArray.reverse().forEach(notif => {
             const div = document.createElement("div");
             div.style.cssText = `padding:10px; border-bottom:1px solid #eee; font-size:13px; background:${notif.read ? '#fff' : '#e7f3ff'};`;
-
             if (notif.image) {
                 div.className = "notif-with-img";
-                div.innerHTML = `
-                    <img class="notif-thumb" src="${notif.image}" alt="">
-                    <div style="flex:1;">
-                        ${notif.text}<br>
-                        <span style="color:gray; font-size:11px;">${notif.time || ''}</span>
-                    </div>`;
+                div.innerHTML = `<img class="notif-thumb" src="${notif.image}" alt=""><div style="flex:1;">${notif.text}<br><span style="color:gray; font-size:11px;">${notif.time || ''}</span></div>`;
                 div.querySelector('.notif-thumb')?.addEventListener('click', () => {
                     document.getElementById("previewImageLarge").src = notif.image;
                     document.getElementById("imagePreviewModal").style.display = "flex";
@@ -619,11 +574,9 @@ function listenToNotifications() {
 function switchTab(tabId, element, pushToHistory = true) {
     if (activeTab === tabId && pushToHistory) return;
     activeTab = tabId;
-
     document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById(tabId)?.classList.add('active');
-
     if (!element) {
         if (tabId === 'homeTab') element = document.getElementById('btnHomeTab');
         else if (tabId === 'profileTab') element = document.getElementById('btnProfileTab');
@@ -631,13 +584,9 @@ function switchTab(tabId, element, pushToHistory = true) {
         else if (tabId === 'msgTab') element = document.getElementById('btnMsgTab');
     }
     if (element) element.classList.add('active');
-
     if (tabId === 'notifTab') {
         const badge = document.getElementById("notifBadge");
-        if (badge) {
-            badge.innerText = "0";
-            badge.style.display = "none";
-        }
+        if (badge) { badge.innerText = "0"; badge.style.display = "none"; }
         const currentUser = auth.currentUser;
         if (currentUser) {
             get(ref(db, 'notifications/' + currentUser.uid)).then(snapshot => {
@@ -651,7 +600,6 @@ function switchTab(tabId, element, pushToHistory = true) {
             });
         }
     }
-
     if (tabId === 'msgTab') loadChatUsersList();
     if (pushToHistory) history.pushState({ tabId }, "", "");
 }
@@ -662,11 +610,10 @@ function openUserProfile(uid) {
     loadUserData(uid);
 }
 
-// ========== Gallery ==========
+// ========== Gallery & Stats ==========
 function loadUserPhotosGallery(uid) {
     const gallery = document.getElementById("userPhotosGallery");
     if (!gallery) return;
-
     onValue(ref(db, 'posts'), (snapshot) => {
         gallery.innerHTML = "";
         if (!snapshot.exists()) {
@@ -707,10 +654,8 @@ function loadProfileStats(targetUid) {
 function loadChatUsersList() {
     const listContainer = document.getElementById("usersForChatList");
     if (!listContainer) return;
-
     document.getElementById("chatUserList").style.display = "block";
     document.getElementById("chatRoomBox").style.display = "none";
-
     const currentUser = auth.currentUser;
     if (!currentUser) return;
 
@@ -720,10 +665,8 @@ function loadChatUsersList() {
             listContainer.innerHTML = "<div style='padding:15px; text-align:center; color:gray;'>কোনো ইউজার পাওয়া যায়নি</div>";
             return;
         }
-
         const users = snapshot.val();
         let found = false;
-
         Object.keys(users).forEach(uid => {
             if (uid === currentUser.uid) return;
             found = true;
@@ -731,17 +674,13 @@ function loadChatUsersList() {
             const pic = u.photo
                 ? `<img src="${u.photo}" style="width:40px; height:40px; border-radius:50%; object-fit:cover;">`
                 : `<div style="width:40px; height:40px; border-radius:50%; background:#ccc; display:flex; align-items:center; justify-content:center; font-weight:bold;">${(u.name || 'U')[0]}</div>`;
-
             const item = document.createElement("div");
             item.style.cssText = "display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid #eee; cursor:pointer; background:#fff;";
             item.innerHTML = `${pic} <span>${u.name || 'User'}</span>`;
             item.onclick = () => openChatRoom(uid, u.name || 'User');
             listContainer.appendChild(item);
         });
-
-        if (!found) {
-            listContainer.innerHTML = "<div style='padding:15px; text-align:center; color:gray;'>অন্য কোনো ইউজার রেজিস্টার্ড নেই</div>";
-        }
+        if (!found) listContainer.innerHTML = "<div style='padding:15px; text-align:center; color:gray;'>অন্য কোনো ইউজার রেজিস্টার্ড নেই</div>";
     });
 }
 
@@ -749,23 +688,16 @@ function openChatRoom(receiverUid, receiverName) {
     activeChatReceiverId = receiverUid;
     document.getElementById("chatReceiverName").innerText = receiverName;
     document.getElementById("chatUserList").style.display = "none";
-
     const picContainer = document.getElementById("chatReceiverPic");
     picContainer.innerHTML = "";
     get(ref(db, 'userProfile/' + receiverUid)).then(snap => {
         const data = snap.val() || {};
-        if (data.photo) {
-            picContainer.innerHTML = `<img src="${data.photo}" alt="">`;
-        } else {
-            picContainer.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#ccc;color:#555;font-weight:bold;">${(receiverName[0] || 'U').toUpperCase()}</div>`;
-        }
+        if (data.photo) picContainer.innerHTML = `<img src="${data.photo}" alt="">`;
+        else picContainer.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#ccc;color:#555;font-weight:bold;">${(receiverName[0] || 'U').toUpperCase()}</div>`;
     });
-
     const chatRoomBox = document.getElementById("chatRoomBox");
     chatRoomBox.style.display = "flex";
-    if (window.visualViewport) {
-        chatRoomBox.style.height = `${window.visualViewport.height}px`;
-    }
+    if (window.visualViewport) chatRoomBox.style.height = `${window.visualViewport.height}px`;
     listenToMessages(receiverUid);
 }
 
@@ -778,7 +710,6 @@ function sendDirectMessage() {
     const input = document.getElementById("chatInputText");
     const text = input?.value.trim() || "";
     if (!currentUser || !activeChatReceiverId || !text) return;
-
     const roomId = getChatRoomId(currentUser.uid, activeChatReceiverId);
     push(ref(db, 'chats/' + roomId), {
         sender: currentUser.uid,
@@ -795,7 +726,6 @@ async function sendChatImage(e) {
     const file = e.target.files[0];
     const currentUser = auth.currentUser;
     if (!file || !currentUser || !activeChatReceiverId) return;
-
     try {
         const base64 = await fileToBase64(file, 800);
         const roomId = getChatRoomId(currentUser.uid, activeChatReceiverId);
@@ -815,13 +745,11 @@ async function sendChatVideo(e) {
     const file = e.target.files[0];
     const currentUser = auth.currentUser;
     if (!file || !currentUser || !activeChatReceiverId) return;
-
     if (file.size > 8 * 1024 * 1024) {
-        alert("ভিডিও খুব বড়! সর্বোচ্চ ৮ MB পর্যন্ত পাঠাতে পারবেন।");
+        alert("ভিডিও খুব বড়! সর্বোচ্চ ৮ MB পর্যন্ত।");
         e.target.value = "";
         return;
     }
-
     try {
         const base64 = await fileToBase64(file);
         const roomId = getChatRoomId(currentUser.uid, activeChatReceiverId);
@@ -837,7 +765,7 @@ async function sendChatVideo(e) {
     e.target.value = "";
 }
 
-// ========== Audio Recording (নয়েজ কমানো হয়েছে) ==========
+// ========== Audio Recording ==========
 async function toggleAudioRecording() {
     if (isRecording) stopAudioRecording();
     else startAudioRecording();
@@ -854,30 +782,20 @@ async function startAudioRecording() {
                 sampleRate: 16000
             }
         });
-
         mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
         audioChunks = [];
-
-        mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) audioChunks.push(e.data);
-        };
-
+        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
         mediaRecorder.onstop = async () => {
             stream.getTracks().forEach(t => t.stop());
             if (audioChunks.length === 0) return;
-
             const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
             const reader = new FileReader();
-            reader.onload = () => {
-                sendAudioMessage(reader.result);
-            };
+            reader.onload = () => sendAudioMessage(reader.result);
             reader.readAsDataURL(audioBlob);
         };
-
         mediaRecorder.start();
         isRecording = true;
         recordingStartTime = Date.now();
-
         document.getElementById("recordAudioBtn")?.classList.add("recording");
         document.getElementById("recordingIndicator").style.display = "flex";
         recordingTimerInterval = setInterval(updateRecordingTimer, 200);
@@ -890,10 +808,8 @@ function stopAudioRecording(cancel = false) {
     if (!isRecording || !mediaRecorder) return;
     isRecording = false;
     clearInterval(recordingTimerInterval);
-
     document.getElementById("recordAudioBtn")?.classList.remove("recording");
     document.getElementById("recordingIndicator").style.display = "none";
-
     if (cancel) {
         mediaRecorder.ondataavailable = null;
         mediaRecorder.onstop = null;
@@ -916,7 +832,6 @@ function updateRecordingTimer() {
 async function sendAudioMessage(base64Audio) {
     const currentUser = auth.currentUser;
     if (!currentUser || !activeChatReceiverId) return;
-
     try {
         const roomId = getChatRoomId(currentUser.uid, activeChatReceiverId);
         await push(ref(db, 'chats/' + roomId), {
@@ -934,29 +849,24 @@ function listenToMessages(receiverUid) {
     const currentUser = auth.currentUser;
     const displayArea = document.getElementById("messageDisplayArea");
     if (!currentUser || !displayArea) return;
-
     const roomId = getChatRoomId(currentUser.uid, receiverUid);
-
     onValue(ref(db, 'chats/' + roomId), (snapshot) => {
         displayArea.innerHTML = "";
         if (!snapshot.exists()) {
             displayArea.innerHTML = "<div style='text-align:center; color:gray; font-size:12px; margin-top:20px;'>কথা বলা শুরু করুন...</div>";
             return;
         }
-
         Object.values(snapshot.val()).forEach(m => {
             const isMe = m.sender === currentUser.uid;
             const isImageOnly = m.image && !m.text && !m.audio && !m.video;
             const msgDiv = document.createElement("div");
             msgDiv.className = `msg-bubble ${isMe ? 'msg-sent' : 'msg-received'}${isImageOnly ? ' msg-image-only' : ''}`;
-
             let contentHTML = '';
             if (m.text) contentHTML += `<div>${m.text}</div>`;
             if (m.image) contentHTML += `<img src="${m.image}" style="max-width:240px; border-radius:8px; display:block;">`;
             if (m.audio) contentHTML += `<div class="msg-audio"><audio controls src="${m.audio}" style="height:32px;"></audio></div>`;
             if (m.video) contentHTML += `<div class="msg-video"><video controls src="${m.video}" style="max-width:240px; max-height:200px; border-radius:10px;"></video></div>`;
             contentHTML += `<div class="msg-time">${m.time || ''}</div>`;
-
             msgDiv.innerHTML = contentHTML;
             displayArea.appendChild(msgDiv);
         });
@@ -964,7 +874,7 @@ function listenToMessages(receiverUid) {
     });
 }
 
-// ========== WebRTC Calling ==========
+// ========== WebRTC Calling (Improved) ==========
 async function startCall(type) {
     if (!activeChatReceiverId) return;
     currentCallType = type;
@@ -986,7 +896,6 @@ async function startCall(type) {
         document.getElementById("switchCameraBtn").style.display = type === 'video' ? 'flex' : 'none';
 
         peerConnection = new RTCPeerConnection(rtcConfig);
-
         localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
         peerConnection.ontrack = (e) => {
@@ -1010,9 +919,11 @@ async function startCall(type) {
             callerName: cachedUserName,
             receiver: activeCallPartnerId,
             offer: { type: offer.type, sdp: offer.sdp },
-            status: 'ringing'
+            status: 'ringing',
+            timestamp: Date.now()
         });
 
+        // Listen for answer
         onValue(ref(db, `calls/${callRoomId}/answer`), (snapshot) => {
             const answer = snapshot.val();
             if (answer && peerConnection && !peerConnection.currentRemoteDescription) {
@@ -1050,6 +961,9 @@ function listenToIncomingCalls(myUid) {
         Object.keys(calls).forEach(roomId => {
             const call = calls[roomId];
             if (call.receiver === myUid && call.status === 'ringing') {
+                // Avoid showing multiple times
+                if (document.getElementById("incomingCallModal").style.display === "flex") return;
+
                 incomingCallerId = call.caller;
                 activeCallPartnerId = call.caller;
                 currentCallType = call.type;
@@ -1065,7 +979,6 @@ function listenToIncomingCalls(myUid) {
 
 async function acceptIncomingCall() {
     stopRingtone();
-
     document.getElementById("incomingCallModal").style.display = "none";
     document.getElementById("callModal").style.display = "flex";
 
@@ -1103,7 +1016,6 @@ async function acceptIncomingCall() {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(callData.offer));
             const answer = await peerConnection.createAnswer();
             await peerConnection.setLocalDescription(answer);
-
             await update(ref(db, `calls/${callRoomId}`), {
                 answer: { type: answer.type, sdp: answer.sdp },
                 status: 'connected'
@@ -1176,10 +1088,8 @@ function endCallUI() {
 function toggleFollow() {
     const currentUser = auth.currentUser;
     if (!currentUser || !viewingUserId || currentUser.uid === viewingUserId) return;
-
     const myFollowingRef = ref(db, `following/${currentUser.uid}/${viewingUserId}`);
     const userFollowersRef = ref(db, `followers/${viewingUserId}/${currentUser.uid}`);
-
     get(myFollowingRef).then((snapshot) => {
         if (snapshot.exists()) {
             remove(myFollowingRef);
@@ -1217,7 +1127,6 @@ function loadFollowStats(uid) {
     onValue(ref(db, `following/${uid}`), (snapshot) => {
         document.getElementById("followingCount").innerText = snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
     });
-
     const currentUser = auth.currentUser;
     const followBtn = document.getElementById("followBtn");
     if (currentUser && currentUser.uid !== uid) {
@@ -1235,17 +1144,14 @@ function showUserList(targetUid, type) {
     const title = document.getElementById("listModalTitle");
     const modal = document.getElementById("listModal");
     if (!container || !modal || !title) return;
-
     container.innerHTML = "<div style='text-align:center; padding:15px; color:gray;'>লোড হচ্ছে...</div>";
     title.innerText = type === 'followers' ? "Followers" : "Following";
     modal.style.display = "flex";
-
     get(ref(db, `${type}/${targetUid}`)).then((snapshot) => {
         if (!snapshot.exists()) {
             container.innerHTML = `<div style="text-align:center; padding:20px; color:gray;">কোনো ইউজার পাওয়া যায়নি</div>`;
             return;
         }
-
         container.innerHTML = "";
         Object.keys(snapshot.val()).forEach(uid => {
             get(ref(db, `userProfile/${uid}`)).then((userSnap) => {
@@ -1254,7 +1160,6 @@ function showUserList(targetUid, type) {
                 const userPic = user.photo
                     ? `<img src="${user.photo}" style="width:36px; height:36px; border-radius:50%; object-fit:cover;">`
                     : `<div style="width:36px; height:36px; border-radius:50%; background:#ccc; display:flex; align-items:center; justify-content:center;">${(user.name || 'U')[0]}</div>`;
-
                 const div = document.createElement("div");
                 div.style.cssText = "display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid #eee; cursor:pointer;";
                 div.innerHTML = `${userPic} <span>${user.name || 'User'}</span>`;
@@ -1273,22 +1178,18 @@ function handleUserSearch(e) {
     const query = e.target.value.toLowerCase().trim();
     const resultsContainer = document.getElementById("searchResults");
     if (!resultsContainer) return;
-
     if (!query) {
         resultsContainer.innerHTML = "";
         resultsContainer.style.display = "none";
         return;
     }
-
     get(ref(db, 'userProfile')).then((snapshot) => {
         if (!snapshot.exists()) {
             resultsContainer.style.display = "none";
             return;
         }
-
         resultsContainer.innerHTML = "";
         let foundAny = false;
-
         Object.keys(snapshot.val()).forEach(uid => {
             const user = snapshot.val()[uid];
             if ((user.name || "User").toLowerCase().includes(query)) {
@@ -1296,7 +1197,6 @@ function handleUserSearch(e) {
                 const userPic = user.photo
                     ? `<img src="${user.photo}" style="width:32px; height:32px; border-radius:50%; object-fit:cover;">`
                     : `<div style="width:32px; height:32px; border-radius:50%; background:#ccc; display:flex; align-items:center; justify-content:center; font-size:13px;">${(user.name || 'U')[0]}</div>`;
-
                 const div = document.createElement("div");
                 div.style.cssText = "display:flex; align-items:center; gap:8px; padding:8px; cursor:pointer; border-bottom:1px solid #eee;";
                 div.innerHTML = `${userPic} <span>${user.name || 'User'}</span>`;
@@ -1308,11 +1208,8 @@ function handleUserSearch(e) {
                 resultsContainer.appendChild(div);
             }
         });
-
         resultsContainer.style.display = "block";
-        if (!foundAny) {
-            resultsContainer.innerHTML = `<div style="padding:10px; text-align:center; color:gray; font-size:13px;">কোনো ইউজার পাওয়া যায়নি</div>`;
-        }
+        if (!foundAny) resultsContainer.innerHTML = `<div style="padding:10px; text-align:center; color:gray; font-size:13px;">কোনো ইউজার পাওয়া যায়নি</div>`;
     });
 }
 
@@ -1322,16 +1219,13 @@ function loadPosts() {
         const feedContainer = document.getElementById("feedContainer");
         if (!feedContainer) return;
         feedContainer.innerHTML = "";
-
         const data = snapshot.val();
         if (!data) return;
-
         const currentUser = auth.currentUser;
 
         Object.keys(data).reverse().forEach(key => {
             const post = data[key];
             let likeCount = 0, dislikeCount = 0, myReaction = null;
-
             if (post.reactions) {
                 Object.entries(post.reactions).forEach(([uid, type]) => {
                     if (type === 'like') likeCount++;
@@ -1339,12 +1233,10 @@ function loadPosts() {
                     if (currentUser && uid === currentUser.uid) myReaction = type;
                 });
             }
-
             let commentCount = 0, commentsHTML = "";
             if (post.comments) {
                 const commentEntries = Object.entries(post.comments);
                 commentCount = commentEntries.length;
-
                 commentEntries.forEach(([commentId, c]) => {
                     let repliesHTML = "";
                     if (c.replies) {
@@ -1352,7 +1244,6 @@ function loadPosts() {
                             repliesHTML += `<div style="margin-left:15px; font-size:12px; color:#555; margin-top:4px;"><b>${r.userName}:</b> ${r.text}</div>`;
                         });
                     }
-
                     commentsHTML += `
                         <div style="margin-bottom:8px; font-size:13px;">
                             <b>${c.userName}:</b> ${c.text}
@@ -1365,18 +1256,15 @@ function loadPosts() {
                         </div>`;
                 });
             }
-
             const imageHTML = post.image ? `<img src="${post.image}" style="width:100%; max-height:300px; object-fit:cover; border-radius:8px; margin-top:8px; cursor:pointer;" onclick="document.getElementById('previewImageLarge').src='${post.image}';document.getElementById('imagePreviewModal').style.display='flex'">` : "";
             const userPicHTML = post.userPic
                 ? `<img src="${post.userPic}" style="width:36px; height:36px; border-radius:50%; object-fit:cover;">`
                 : `<div style="width:36px; height:36px; border-radius:50%; background:#ccc; display:flex; align-items:center; justify-content:center; font-weight:bold;">${(post.userName || 'U')[0]}</div>`;
-
             const isMyPost = currentUser && currentUser.uid === post.userId;
 
             const postElement = document.createElement("div");
             postElement.className = "card";
             postElement.style.position = "relative";
-
             postElement.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div class="post-user-info" data-userid="${post.userId}" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
@@ -1398,15 +1286,9 @@ function loadPosts() {
                 ${post.content ? `<div style="margin-top:10px; font-size:14px;">${post.content}</div>` : ''}
                 ${imageHTML}
                 <div style="display:flex; gap:15px; margin-top:12px; padding-top:8px; border-top:1px solid #eee; font-size:13px;">
-                    <button class="like-btn" data-postid="${key}" style="background:none; border:none; cursor:pointer; color:${myReaction === 'like' ? '#1877f2' : '#65676b'};">
-                        👍 ${likeCount > 0 ? likeCount : ''} Like
-                    </button>
-                    <button class="dislike-btn" data-postid="${key}" style="background:none; border:none; cursor:pointer; color:${myReaction === 'dislike' ? '#1877f2' : '#65676b'};">
-                        👎 ${dislikeCount > 0 ? dislikeCount : ''} Unlike
-                    </button>
-                    <button class="comment-toggle-btn" data-postid="${key}" style="background:none; border:none; cursor:pointer; color:#65676b;">
-                        💬 ${commentCount > 0 ? commentCount : ''} Comment
-                    </button>
+                    <button class="like-btn" data-postid="${key}" style="background:none; border:none; cursor:pointer; color:${myReaction === 'like' ? '#1877f2' : '#65676b'};">👍 ${likeCount > 0 ? likeCount : ''} Like</button>
+                    <button class="dislike-btn" data-postid="${key}" style="background:none; border:none; cursor:pointer; color:${myReaction === 'dislike' ? '#1877f2' : '#65676b'};">👎 ${dislikeCount > 0 ? dislikeCount : ''} Unlike</button>
+                    <button class="comment-toggle-btn" data-postid="${key}" style="background:none; border:none; cursor:pointer; color:#65676b;">💬 ${commentCount > 0 ? commentCount : ''} Comment</button>
                 </div>
                 <div id="comment-section-${key}" style="display:none; margin-top:10px; border-top:1px solid #eee; padding-top:10px;">
                     <div style="display:flex; gap:6px; margin-bottom:10px;">
@@ -1416,10 +1298,8 @@ function loadPosts() {
                     ${commentsHTML}
                 </div>
             `;
-
-            postElement.querySelector('.post-user-info')?.addEventListener('click', (e) => {
-                openUserProfile(e.currentTarget.getAttribute('data-userid'));
-            });
+            // Event listeners (same as before)
+            postElement.querySelector('.post-user-info')?.addEventListener('click', (e) => openUserProfile(e.currentTarget.getAttribute('data-userid')));
             postElement.querySelector('.more-btn')?.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const menu = document.getElementById(`menu-${e.currentTarget.getAttribute('data-postid')}`);
@@ -1428,40 +1308,23 @@ function loadPosts() {
             postElement.querySelector('.share-btn')?.addEventListener('click', (e) => {
                 const content = e.currentTarget.getAttribute('data-content');
                 const img = e.currentTarget.getAttribute('data-image');
-                if (navigator.share) {
-                    navigator.share({ title: 'Mini App Post', text: content, url: img || window.location.href });
-                } else {
-                    navigator.clipboard.writeText(img || window.location.href);
-                    alert("লিংক কপি হয়েছে!");
-                }
+                if (navigator.share) navigator.share({ title: 'Mini App Post', text: content, url: img || window.location.href });
+                else { navigator.clipboard.writeText(img || window.location.href); alert("লিংক কপি হয়েছে!"); }
             });
             postElement.querySelector('.save-img-btn')?.addEventListener('click', (e) => {
                 const img = e.currentTarget.getAttribute('data-image');
-                if (img) {
-                    const a = document.createElement('a');
-                    a.href = img;
-                    a.download = 'post-image.jpg';
-                    a.click();
-                }
+                if (img) { const a = document.createElement('a'); a.href = img; a.download = 'post-image.jpg'; a.click(); }
             });
             postElement.querySelector('.delete-post-btn')?.addEventListener('click', (e) => {
-                if (confirm("আপনি কি পোস্টটি ডিলেট করতে চান?")) {
-                    remove(ref(db, `posts/${e.currentTarget.getAttribute('data-postid')}`));
-                }
+                if (confirm("আপনি কি পোস্টটি ডিলেট করতে চান?")) remove(ref(db, `posts/${e.currentTarget.getAttribute('data-postid')}`));
             });
-            postElement.querySelector('.like-btn')?.addEventListener('click', (e) => {
-                handleReaction(e.currentTarget.getAttribute('data-postid'), 'like');
-            });
-            postElement.querySelector('.dislike-btn')?.addEventListener('click', (e) => {
-                handleReaction(e.currentTarget.getAttribute('data-postid'), 'dislike');
-            });
+            postElement.querySelector('.like-btn')?.addEventListener('click', (e) => handleReaction(e.currentTarget.getAttribute('data-postid'), 'like'));
+            postElement.querySelector('.dislike-btn')?.addEventListener('click', (e) => handleReaction(e.currentTarget.getAttribute('data-postid'), 'dislike'));
             postElement.querySelector('.comment-toggle-btn')?.addEventListener('click', (e) => {
                 const box = document.getElementById(`comment-section-${e.currentTarget.getAttribute('data-postid')}`);
                 if (box) box.style.display = box.style.display === 'block' ? 'none' : 'block';
             });
-            postElement.querySelector('.send-comment-btn')?.addEventListener('click', (e) => {
-                addComment(e.currentTarget.getAttribute('data-postid'));
-            });
+            postElement.querySelector('.send-comment-btn')?.addEventListener('click', (e) => addComment(e.currentTarget.getAttribute('data-postid')));
             postElement.querySelectorAll('.reply-toggle-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     const pId = e.currentTarget.getAttribute('data-postid');
@@ -1471,11 +1334,8 @@ function loadPosts() {
                 });
             });
             postElement.querySelectorAll('.send-reply-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    addReply(e.currentTarget.getAttribute('data-postid'), e.currentTarget.getAttribute('data-commentid'));
-                });
+                btn.addEventListener('click', (e) => addReply(e.currentTarget.getAttribute('data-postid'), e.currentTarget.getAttribute('data-commentid')));
             });
-
             feedContainer.appendChild(postElement);
         });
     });
@@ -1484,20 +1344,15 @@ function loadPosts() {
 function handleReaction(postId, type) {
     const user = auth.currentUser;
     if (!user) return;
-
     get(ref(db, `posts/${postId}`)).then(postSnap => {
         if (!postSnap.exists()) return;
         const post = postSnap.val();
         const reactionRef = ref(db, `posts/${postId}/reactions/${user.uid}`);
-
         get(reactionRef).then(snapshot => {
-            if (snapshot.val() === type) {
-                remove(reactionRef);
-            } else {
+            if (snapshot.val() === type) remove(reactionRef);
+            else {
                 set(reactionRef, type);
-                if (type === 'like' && post.userId) {
-                    sendNotification(post.userId, `${cachedUserName} আপনার পোস্টে লাইক দিয়েছেন।`, post.image || null);
-                }
+                if (type === 'like' && post.userId) sendNotification(post.userId, `${cachedUserName} আপনার পোস্টে লাইক দিয়েছেন।`, post.image || null);
             }
         });
     });
@@ -1509,17 +1364,14 @@ function addComment(postId) {
     const input = document.getElementById(`comment-input-${postId}`);
     const text = input?.value.trim() || "";
     if (!text) return;
-
     get(ref(db, `posts/${postId}`)).then(postSnap => {
         if (!postSnap.exists()) return;
         const post = postSnap.val();
-
         push(ref(db, `posts/${postId}/comments`), {
             userName: cachedUserName,
             text,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         });
-
         if (post.userId) sendNotification(post.userId, `${cachedUserName} কমেন্ট করেছেন: "${text}"`, post.image || null);
         input.value = "";
     });
@@ -1531,16 +1383,13 @@ function addReply(postId, commentId) {
     const input = document.getElementById(`reply-input-${postId}-${commentId}`);
     const text = input?.value.trim() || "";
     if (!text) return;
-
     get(ref(db, `posts/${postId}`)).then(postSnap => {
         if (!postSnap.exists()) return;
         const post = postSnap.val();
-
         push(ref(db, `posts/${postId}/comments/${commentId}/replies`), {
             userName: cachedUserName,
             text
         });
-
         if (post.userId) sendNotification(post.userId, `${cachedUserName} আপনার কমেন্টে রিপ্লাই দিয়েছেন।`, post.image || null);
         input.value = "";
     });
@@ -1552,25 +1401,20 @@ if (window.visualViewport) {
         const chatRoomBox = document.getElementById('chatRoomBox');
         if (chatRoomBox && chatRoomBox.style.display !== 'none') {
             chatRoomBox.style.height = `${window.visualViewport.height}px`;
-            const messageDisplayArea = document.getElementById('messageDisplayArea');
-            if (messageDisplayArea) messageDisplayArea.scrollTop = messageDisplayArea.scrollHeight;
+            const area = document.getElementById('messageDisplayArea');
+            if (area) area.scrollTop = area.scrollHeight;
         }
     });
 }
 
 window.addEventListener('popstate', function (event) {
-    if (event.state?.tabId) {
-        switchTab(event.state.tabId, null, false);
-    } else {
-        switchTab('homeTab', null, false);
-    }
+    if (event.state?.tabId) switchTab(event.state.tabId, null, false);
+    else switchTab('homeTab', null, false);
 });
-
 history.replaceState({ tabId: 'homeTab' }, "", "");
 
 // ========== Terminal ==========
 let lastLocation = null;
-
 function openTerminal() {
     const modal = document.getElementById("terminalModal");
     const output = document.getElementById("terminalOutput");
@@ -1579,11 +1423,9 @@ function openTerminal() {
     modal.style.display = "flex";
     setTimeout(() => document.getElementById("terminalInput")?.focus(), 100);
 }
-
 function closeTerminal() {
     document.getElementById("terminalModal").style.display = "none";
 }
-
 function terminalPrint(text) {
     const output = document.getElementById("terminalOutput");
     if (output) {
@@ -1591,41 +1433,31 @@ function terminalPrint(text) {
         output.scrollTop = output.scrollHeight;
     }
 }
-
 function handleTerminalCommand(cmd) {
     if (!cmd) return;
     terminalPrint(`$ ${cmd}`);
-
     if (cmd.toLowerCase() === "akbor") {
         const receiverName = document.getElementById("chatReceiverName")?.innerText || "User";
         terminalPrint("Authenticating...");
         terminalPrint("Access granted.");
         terminalPrint(`Tracking location of: ${receiverName}...`);
-
         if (!navigator.geolocation) {
             terminalPrint("Error: Geolocation not supported.");
             return;
         }
-
         navigator.geolocation.getCurrentPosition(
             (pos) => {
                 const lat = pos.coords.latitude.toFixed(6);
                 const lng = pos.coords.longitude.toFixed(6);
                 lastLocation = { lat, lng, name: receiverName };
-
                 terminalPrint(`Location found for ${receiverName}:`);
                 terminalPrint(`Lat: ${lat}`);
                 terminalPrint(`Lng: ${lng}`);
                 terminalPrint(``);
                 terminalPrint(`>> <span class="location-link" id="openMapLink">লোকেশন</span>`);
-
-                setTimeout(() => {
-                    document.getElementById("openMapLink")?.addEventListener("click", openLocationMap);
-                }, 50);
+                setTimeout(() => document.getElementById("openMapLink")?.addEventListener("click", openLocationMap), 50);
             },
-            () => {
-                terminalPrint("Error: Location permission denied or unavailable.");
-            },
+            () => terminalPrint("Error: Location permission denied or unavailable."),
             { enableHighAccuracy: true, timeout: 10000 }
         );
     } else if (cmd.toLowerCase() === "clear") {
@@ -1640,23 +1472,18 @@ function handleTerminalCommand(cmd) {
         terminalPrint(`Type "help" for available commands.`);
     }
 }
-
 function openLocationMap() {
     if (!lastLocation) return alert("No location data available.");
-
     const { lat, lng, name } = lastLocation;
     const mapContainer = document.getElementById("mapContainer");
     const mapModal = document.getElementById("mapModal");
-
     mapContainer.innerHTML = `
         <iframe width="100%" height="100%" frameborder="0" scrolling="no" marginheight="0" marginwidth="0"
             src="https://www.openstreetmap.org/export/embed.html?bbox=${parseFloat(lng)-0.015}%2C${parseFloat(lat)-0.015}%2C${parseFloat(lng)+0.015}%2C${parseFloat(lat)+0.015}&layer=mapnik&marker=${lat}%2C${lng}"
             style="border:0;"></iframe>
         <div style="position:absolute; bottom:10px; left:10px; right:10px; background:rgba(0,0,0,0.8); color:#fff; padding:10px 12px; border-radius:10px; font-size:13px; text-align:center;">
             📍 <b>${name || 'User'}</b> এর লোকেশন<br>
-            <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}" target="_blank" style="color:#4fc3f7; text-decoration:underline; display:inline-block; margin-top:6px;">
-                🗺️ রাস্তা দেখুন
-            </a>
+            <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}" target="_blank" style="color:#4fc3f7; text-decoration:underline; display:inline-block; margin-top:6px;">🗺️ রাস্তা দেখুন</a>
         </div>
     `;
     mapModal.style.display = "flex";
@@ -1676,27 +1503,23 @@ function startCallTimer() {
         timerEl.innerText = `${m}:${s}`;
     }, 500);
 }
-
 function stopCallTimer() {
     if (callTimerInterval) clearInterval(callTimerInterval);
     callTimerInterval = null;
     callStartTime = null;
 }
-
 function toggleMuteMic() {
     if (!localStream) return;
     isMicMuted = !isMicMuted;
     localStream.getAudioTracks().forEach(t => t.enabled = !isMicMuted);
     document.getElementById("muteMicBtn")?.classList.toggle("muted", isMicMuted);
 }
-
 function toggleSpeaker() {
     isSpeakerOn = !isSpeakerOn;
     const remoteVideo = document.getElementById("remoteVideo");
     if (remoteVideo) remoteVideo.muted = !isSpeakerOn;
     document.getElementById("speakerBtn")?.classList.toggle("muted", !isSpeakerOn);
 }
-
 async function switchCamera() {
     if (!localStream || currentCallType !== 'video') return;
     currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
@@ -1707,7 +1530,6 @@ async function switchCamera() {
             video: { facingMode: currentFacingMode }
         });
         document.getElementById("localVideo").srcObject = localStream;
-
         if (peerConnection) {
             const senders = peerConnection.getSenders();
             const videoTrack = localStream.getVideoTracks()[0];
