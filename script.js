@@ -838,15 +838,21 @@ function listenToMessages(receiverUid) {
     });
 }
 
-// ==================== CALL SYSTEM ====================
+// ==================== IMPROVED CALL SYSTEM ====================
 async function startCall(type) {
-    if (!activeChatReceiverId) return alert("আগে চ্যাট খুলুন");
-    
+    if (!activeChatReceiverId) {
+        alert("আগে চ্যাট খুলুন");
+        return;
+    }
+
     currentCallType = type;
     activeCallPartnerId = activeChatReceiverId;
-    const callRoomId = getChatRoomId(auth.currentUser.uid, activeCallPartnerId);
+    const myUid = auth.currentUser.uid;
+    const callRoomId = getChatRoomId(myUid, activeCallPartnerId);
 
-    await set(ref(db, `calls/${callRoomId}`), null);
+    try {
+        await set(ref(db, `calls/${callRoomId}`), null);
+    } catch (e) {}
 
     document.getElementById("callModal").style.display = "flex";
     document.getElementById("callPartnerName").innerText = document.getElementById("chatReceiverName")?.innerText || "User";
@@ -864,7 +870,8 @@ async function startCall(type) {
             localVideo.srcObject = localStream;
             localVideo.style.display = type === 'video' ? 'block' : 'none';
         }
-        document.getElementById("switchCameraBtn").style.display = type === 'video' ? 'flex' : 'none';
+        const switchBtn = document.getElementById("switchCameraBtn");
+        if (switchBtn) switchBtn.style.display = type === 'video' ? 'flex' : 'none';
 
         peerConnection = new RTCPeerConnection(rtcConfig);
 
@@ -888,7 +895,7 @@ async function startCall(type) {
 
         await set(ref(db, `calls/${callRoomId}`), {
             type: type,
-            caller: auth.currentUser.uid,
+            caller: myUid,
             callerName: cachedUserName,
             receiver: activeCallPartnerId,
             offer: {
@@ -902,9 +909,11 @@ async function startCall(type) {
         onValue(ref(db, `calls/${callRoomId}/answer`), async (snapshot) => {
             const answer = snapshot.val();
             if (answer && peerConnection && !peerConnection.currentRemoteDescription) {
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-                stopRingtone();
-                startCallTimer();
+                try {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                    stopRingtone();
+                    startCallTimer();
+                } catch (err) {}
             }
         });
 
@@ -926,7 +935,7 @@ async function startCall(type) {
 
     } catch (err) {
         console.error(err);
-        alert("মাইক্রোফোন/ক্যামেরা চালু করা যায়নি!");
+        alert("মাইক্রোফোন বা ক্যামেরা চালু করা যায়নি!");
         endCall();
     }
 }
@@ -936,12 +945,18 @@ function listenToIncomingCalls(myUid) {
         if (!snapshot.exists()) return;
 
         const calls = snapshot.val();
+        
         Object.keys(calls).forEach(roomId => {
             const call = calls[roomId];
-
-            if (call && call.receiver === myUid && call.status === "ringing") {
+            
+            if (!call) return;
+            
+            if (call.receiver === myUid && call.status === "ringing") {
+                
                 const modal = document.getElementById("incomingCallModal");
-                if (modal && modal.style.display === "flex") return;
+                if (!modal) return;
+                
+                if (modal.style.display === "flex") return;
 
                 incomingCallerId = call.caller;
                 activeCallPartnerId = call.caller;
@@ -949,7 +964,7 @@ function listenToIncomingCalls(myUid) {
 
                 document.getElementById("incomingCallerName").innerText = call.callerName || "Someone";
                 document.getElementById("incomingCallType").innerText = 
-                    call.type === "video" ? "ভিডিও কল আসছে..." : "অডিও কল আসছে...";
+                    (call.type === "video") ? "ভিডিও কল আসছে..." : "অডিও কল আসছে...";
                 
                 modal.style.display = "flex";
                 playRingtone();
@@ -960,10 +975,15 @@ function listenToIncomingCalls(myUid) {
 
 async function acceptIncomingCall() {
     stopRingtone();
-    document.getElementById("incomingCallModal").style.display = "none";
+    
+    const modal = document.getElementById("incomingCallModal");
+    if (modal) modal.style.display = "none";
+    
     document.getElementById("callModal").style.display = "flex";
 
-    const callRoomId = getChatRoomId(auth.currentUser.uid, incomingCallerId);
+    const myUid = auth.currentUser.uid;
+    const callRoomId = getChatRoomId(myUid, incomingCallerId);
+    
     document.getElementById("callPartnerName").innerText = 
         document.getElementById("incomingCallerName")?.innerText || "User";
 
@@ -978,7 +998,8 @@ async function acceptIncomingCall() {
             localVideo.srcObject = localStream;
             localVideo.style.display = currentCallType === "video" ? "block" : "none";
         }
-        document.getElementById("switchCameraBtn").style.display = currentCallType === "video" ? "flex" : "none";
+        const switchBtn = document.getElementById("switchCameraBtn");
+        if (switchBtn) switchBtn.style.display = currentCallType === "video" ? "flex" : "none";
 
         peerConnection = new RTCPeerConnection(rtcConfig);
 
@@ -1041,7 +1062,8 @@ async function acceptIncomingCall() {
 
 function rejectIncomingCall() {
     stopRingtone();
-    document.getElementById("incomingCallModal").style.display = "none";
+    const modal = document.getElementById("incomingCallModal");
+    if (modal) modal.style.display = "none";
     
     if (incomingCallerId && auth.currentUser) {
         const callRoomId = getChatRoomId(auth.currentUser.uid, incomingCallerId);
@@ -1079,9 +1101,14 @@ function endCallUI() {
         peerConnection = null;
     }
 
-    document.getElementById("callModal").style.display = "none";
-    document.getElementById("incomingCallModal").style.display = "none";
-    document.getElementById("callTimer").innerText = "00:00";
+    const callModal = document.getElementById("callModal");
+    const incomingModal = document.getElementById("incomingCallModal");
+    if (callModal) callModal.style.display = "none";
+    if (incomingModal) incomingModal.style.display = "none";
+    
+    const timer = document.getElementById("callTimer");
+    if (timer) timer.innerText = "00:00";
+    
     document.getElementById("muteMicBtn")?.classList.remove("muted");
 }
 
