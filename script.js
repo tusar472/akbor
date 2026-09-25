@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, push, onValue, remove, update, set, get, off } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+import { getDatabase, ref, push, onValue, remove, update, set, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 const firebaseConfig = {
@@ -126,10 +126,12 @@ const rtcConfig = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
         { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
         { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-    ]
+    ],
+    iceCandidatePoolSize: 10
 };
 
 function fileToBase64(file, maxWidth = 800) {
@@ -839,7 +841,7 @@ function listenToMessages(receiverUid) {
     });
 }
 
-// ==================== NEW RELIABLE CALL SYSTEM ====================
+// ==================== IMPROVED CALL SYSTEM ====================
 async function startCall(type) {
     if (!activeChatReceiverId) {
         alert("আগে চ্যাট খুলুন");
@@ -851,7 +853,6 @@ async function startCall(type) {
     const myUid = auth.currentUser.uid;
     currentCallRoomId = getChatRoomId(myUid, activeCallPartnerId);
 
-    // পুরনো ডাটা মুছে ফেলা
     try {
         await set(ref(db, `calls/${currentCallRoomId}`), null);
         await set(ref(db, `incomingCalls/${activeCallPartnerId}`), null);
@@ -864,13 +865,24 @@ async function startCall(type) {
 
     try {
         localStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1
+            },
             video: type === 'video' ? { facingMode: currentFacingMode } : false
+        });
+
+        // নিশ্চিত করা যে অডিও ট্র্যাক চালু আছে
+        localStream.getAudioTracks().forEach(track => {
+            track.enabled = true;
         });
 
         const localVideo = document.getElementById("localVideo");
         if (localVideo) {
             localVideo.srcObject = localStream;
+            localVideo.muted = true; // Echo কমাতে লোকাল ভিডিও সবসময় মিউট
             localVideo.style.display = type === 'video' ? 'block' : 'none';
         }
         const switchBtn = document.getElementById("switchCameraBtn");
@@ -884,7 +896,11 @@ async function startCall(type) {
 
         peerConnection.ontrack = (e) => {
             const remoteVideo = document.getElementById("remoteVideo");
-            if (remoteVideo) remoteVideo.srcObject = e.streams[0];
+            if (remoteVideo) {
+                remoteVideo.srcObject = e.streams[0];
+                remoteVideo.muted = false;
+                remoteVideo.play().catch(() => {});
+            }
         };
 
         peerConnection.onicecandidate = (e) => {
@@ -893,10 +909,23 @@ async function startCall(type) {
             }
         };
 
+        // কানেকশন স্টেট মনিটর
+        peerConnection.oniceconnectionstatechange = () => {
+            const state = peerConnection.iceConnectionState;
+            console.log("ICE State:", state);
+            if (state === "failed" || state === "disconnected" || state === "closed") {
+                // কিছুক্ষণ অপেক্ষা করে কেটে দেওয়া
+                setTimeout(() => {
+                    if (peerConnection && (peerConnection.iceConnectionState === "failed" || peerConnection.iceConnectionState === "disconnected")) {
+                        endCall();
+                    }
+                }, 5000);
+            }
+        };
+
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
 
-        // মূল কল ডাটা
         await set(ref(db, `calls/${currentCallRoomId}`), {
             type: type,
             caller: myUid,
@@ -907,7 +936,6 @@ async function startCall(type) {
             timestamp: Date.now()
         });
 
-        // রিসিভারের জন্য আলাদা নোটিফিকেশন পাথ (এটাই মূল পরিবর্তন)
         await set(ref(db, `incomingCalls/${activeCallPartnerId}`), {
             caller: myUid,
             callerName: cachedUserName,
@@ -917,7 +945,6 @@ async function startCall(type) {
             timestamp: Date.now()
         });
 
-        // Answer শোনা
         onValue(ref(db, `calls/${currentCallRoomId}/answer`), async (snapshot) => {
             const answer = snapshot.val();
             if (answer && peerConnection && !peerConnection.currentRemoteDescription) {
@@ -925,11 +952,12 @@ async function startCall(type) {
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
                     stopRingtone();
                     startCallTimer();
-                } catch (err) {}
+                } catch (err) {
+                    console.error("Answer error:", err);
+                }
             }
         });
 
-        // Receiver ICE
         onValue(ref(db, `calls/${currentCallRoomId}/receiverCandidates`), (snapshot) => {
             if (snapshot.exists() && peerConnection) {
                 Object.values(snapshot.val()).forEach(cand => {
@@ -938,7 +966,6 @@ async function startCall(type) {
             }
         });
 
-        // Status
         onValue(ref(db, `calls/${currentCallRoomId}/status`), (snapshot) => {
             const status = snapshot.val();
             if (status === "ended" || status === "rejected") {
@@ -955,10 +982,7 @@ async function startCall(type) {
 }
 
 function listenToIncomingCalls(myUid) {
-    // পুরনো লিসেনার বন্ধ করে নতুন করে লাগানো
-    const incomingRef = ref(db, `incomingCalls/${myUid}`);
-    
-    onValue(incomingRef, (snapshot) => {
+    onValue(ref(db, `incomingCalls/${myUid}`), (snapshot) => {
         if (!snapshot.exists()) return;
 
         const call = snapshot.val();
@@ -996,20 +1020,29 @@ async function acceptIncomingCall() {
     document.getElementById("callPartnerName").innerText = 
         document.getElementById("incomingCallerName")?.innerText || "User";
 
-    // incomingCalls থেকে মুছে ফেলা
     try {
         await set(ref(db, `incomingCalls/${myUid}`), null);
     } catch (e) {}
 
     try {
         localStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1
+            },
             video: currentCallType === "video" ? { facingMode: currentFacingMode } : false
+        });
+
+        localStream.getAudioTracks().forEach(track => {
+            track.enabled = true;
         });
 
         const localVideo = document.getElementById("localVideo");
         if (localVideo) {
             localVideo.srcObject = localStream;
+            localVideo.muted = true;
             localVideo.style.display = currentCallType === "video" ? "block" : "none";
         }
         const switchBtn = document.getElementById("switchCameraBtn");
@@ -1023,12 +1056,27 @@ async function acceptIncomingCall() {
 
         peerConnection.ontrack = (e) => {
             const remoteVideo = document.getElementById("remoteVideo");
-            if (remoteVideo) remoteVideo.srcObject = e.streams[0];
+            if (remoteVideo) {
+                remoteVideo.srcObject = e.streams[0];
+                remoteVideo.muted = false;
+                remoteVideo.play().catch(() => {});
+            }
         };
 
         peerConnection.onicecandidate = (e) => {
             if (e.candidate) {
                 push(ref(db, `calls/${roomId}/receiverCandidates`), e.candidate.toJSON());
+            }
+        };
+
+        peerConnection.oniceconnectionstatechange = () => {
+            const state = peerConnection.iceConnectionState;
+            if (state === "failed" || state === "disconnected" || state === "closed") {
+                setTimeout(() => {
+                    if (peerConnection && (peerConnection.iceConnectionState === "failed" || peerConnection.iceConnectionState === "disconnected")) {
+                        endCall();
+                    }
+                }, 5000);
             }
         };
 
@@ -1096,7 +1144,6 @@ function endCall() {
     if (activeCallPartnerId && myUid) {
         const roomId = currentCallRoomId || getChatRoomId(myUid, activeCallPartnerId);
         update(ref(db, `calls/${roomId}`), { status: "ended" });
-        // রিসিভারের incomingCalls মুছে ফেলা
         set(ref(db, `incomingCalls/${activeCallPartnerId}`), null);
     }
     endCallUI();
@@ -1572,6 +1619,7 @@ async function switchCamera() {
             video: { facingMode: currentFacingMode }
         });
         document.getElementById("localVideo").srcObject = localStream;
+        document.getElementById("localVideo").muted = true;
         if (peerConnection) {
             const senders = peerConnection.getSenders();
             const videoTrack = localStream.getVideoTracks()[0];
