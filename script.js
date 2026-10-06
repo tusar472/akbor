@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, push, onValue, remove, update, set, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+import { getDatabase, ref, push, onValue, remove, update, set, get, onDisconnect } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 const firebaseConfig = {
@@ -36,6 +36,7 @@ let callStartTime = null;
 let callTimerInterval = null;
 let currentFacingMode = 'user';
 let currentCallRoomId = null;
+let callAnswered = false; // কল রিসিভ হয়েছিল কিনা
 
 // Audio recording
 let mediaRecorder = null;
@@ -50,6 +51,9 @@ let ringtoneOsc = null;
 let ringtoneGain = null;
 let ringtoneInterval = null;
 let isRingtonePlaying = false;
+
+// Online status cache
+let usersStatus = {};
 
 function playRingtone() {
     stopRingtone();
@@ -165,6 +169,64 @@ function fileToBase64(file, maxWidth = 800) {
             reader.onerror = reject;
             reader.readAsDataURL(file);
         }
+    });
+}
+
+// ==================== PRESENCE (ONLINE/OFFLINE) ====================
+function setupPresence(uid) {
+    const statusRef = ref(db, `status/${uid}`);
+    const isOnline = { state: "online", last_changed: Date.now() };
+    const isOffline = { state: "offline", last_changed: Date.now() };
+
+    set(statusRef, isOnline);
+    onDisconnect(statusRef).set(isOffline);
+}
+
+function listenToAllStatus() {
+    onValue(ref(db, 'status'), (snapshot) => {
+        usersStatus = snapshot.val() || {};
+        // চ্যাট লিস্ট আপডেট করতে চাইলে
+        if (activeTab === 'msgTab') {
+            // রি-রেন্ডার না করে শুধু ডট আপডেট করা যায়, এখন সহজ রাখছি
+        }
+    });
+}
+
+function getLastSeenText(uid) {
+    const status = usersStatus[uid];
+    if (!status) return "অফলাইন";
+    if (status.state === "online") return "অনলাইন";
+    
+    const last = status.last_changed || 0;
+    const date = new Date(last);
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    
+    const timeStr = date.toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' });
+    if (isToday) return `শেষ দেখা ${timeStr}`;
+    return `শেষ দেখা ${date.toLocaleDateString('bn-BD')} ${timeStr}`;
+}
+
+function isUserOnline(uid) {
+    return usersStatus[uid]?.state === "online";
+}
+
+// ==================== CALL LOG ====================
+async function saveCallLog(partnerUid, callType, status, durationSec = 0) {
+    const currentUser = auth.currentUser;
+    if (!currentUser || !partnerUid) return;
+    
+    const roomId = getChatRoomId(currentUser.uid, partnerUid);
+    const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    await push(ref(db, 'chats/' + roomId), {
+        type: "call",
+        callType: callType || "audio",   // audio / video
+        status: status,                  // missed / answered / rejected / outgoing
+        duration: durationSec,
+        sender: currentUser.uid,
+        time: timeNow,
+        timestamp: Date.now()
     });
 }
 
@@ -318,6 +380,10 @@ function handleLogin() {
 function handleLogout() {
     stopRingtone();
     endCallUI();
+    const user = auth.currentUser;
+    if (user) {
+        set(ref(db, `status/${user.uid}`), { state: "offline", last_changed: Date.now() });
+    }
     signOut(auth);
 }
 
@@ -331,6 +397,8 @@ onAuthStateChanged(auth, (user) => {
         listenToNotifications();
         listenToIncomingCalls(user.uid);
         loadPosts();
+        setupPresence(user.uid);
+        listenToAllStatus();
     } else {
         document.getElementById('authContainer').style.display = 'block';
         document.getElementById('mainApp').style.display = 'none';
@@ -639,12 +707,28 @@ function loadChatUsersList() {
             if (uid === currentUser.uid) return;
             found = true;
             const u = users[uid];
+            const online = isUserOnline(uid);
+            const lastSeen = getLastSeenText(uid);
+            
             const pic = u.photo
-                ? `<img src="${u.photo}" style="width:40px; height:40px; border-radius:50%; object-fit:cover;">`
-                : `<div style="width:40px; height:40px; border-radius:50%; background:#ccc; display:flex; align-items:center; justify-content:center; font-weight:bold;">${(u.name || 'U')[0]}</div>`;
+                ? `<div style="position:relative; width:42px; height:42px;">
+                     <img src="${u.photo}" style="width:42px; height:42px; border-radius:50%; object-fit:cover;">
+                     ${online ? '<span style="position:absolute; bottom:0; right:0; width:12px; height:12px; background:#25D366; border:2px solid #fff; border-radius:50%;"></span>' : ''}
+                   </div>`
+                : `<div style="position:relative; width:42px; height:42px;">
+                     <div style="width:42px; height:42px; border-radius:50%; background:#ccc; display:flex; align-items:center; justify-content:center; font-weight:bold;">${(u.name || 'U')[0]}</div>
+                     ${online ? '<span style="position:absolute; bottom:0; right:0; width:12px; height:12px; background:#25D366; border:2px solid #fff; border-radius:50%;"></span>' : ''}
+                   </div>`;
+            
             const item = document.createElement("div");
-            item.style.cssText = "display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid #eee; cursor:pointer; background:#fff;";
-            item.innerHTML = `${pic} <span>${u.name || 'User'}</span>`;
+            item.style.cssText = "display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom:1px solid #eee; cursor:pointer; background:#fff;";
+            item.innerHTML = `
+                ${pic}
+                <div style="flex:1; min-width:0;">
+                    <div style="font-weight:600; font-size:15px;">${u.name || 'User'}</div>
+                    <div style="font-size:12px; color:${online ? '#25D366' : '#888'};">${lastSeen}</div>
+                </div>
+            `;
             item.onclick = () => openChatRoom(uid, u.name || 'User');
             listContainer.appendChild(item);
         });
@@ -824,6 +908,38 @@ function listenToMessages(receiverUid) {
             return;
         }
         Object.values(snapshot.val()).forEach(m => {
+            // Call log message
+            if (m.type === "call") {
+                const isMe = m.sender === currentUser.uid;
+                let icon = "📞";
+                let text = "";
+                let color = "#555";
+                
+                if (m.status === "missed") {
+                    icon = "📵";
+                    text = m.callType === "video" ? "মিসড ভিডিও কল" : "মিসড অডিও কল";
+                    color = "#e74c3c";
+                } else if (m.status === "rejected") {
+                    icon = "🚫";
+                    text = "কল রিজেক্ট করা হয়েছে";
+                    color = "#e67e22";
+                } else if (m.status === "answered") {
+                    icon = m.callType === "video" ? "📹" : "📞";
+                    const dur = m.duration ? ` (${Math.floor(m.duration/60)}:${(m.duration%60).toString().padStart(2,'0')})` : "";
+                    text = (m.callType === "video" ? "ভিডিও কল" : "অডিও কল") + dur;
+                    color = "#27ae60";
+                } else {
+                    icon = "📞";
+                    text = "কল";
+                }
+                
+                const callDiv = document.createElement("div");
+                callDiv.style.cssText = `text-align:center; margin:12px 0; font-size:13px; color:${color};`;
+                callDiv.innerHTML = `${icon} ${text} <span style="color:#999; font-size:11px;">${m.time || ''}</span>`;
+                displayArea.appendChild(callDiv);
+                return;
+            }
+
             const isMe = m.sender === currentUser.uid;
             const isImageOnly = m.image && !m.text && !m.audio && !m.video;
             const msgDiv = document.createElement("div");
@@ -841,7 +957,7 @@ function listenToMessages(receiverUid) {
     });
 }
 
-// ==================== IMPROVED CALL SYSTEM ====================
+// ==================== CALL SYSTEM ====================
 async function startCall(type) {
     if (!activeChatReceiverId) {
         alert("আগে চ্যাট খুলুন");
@@ -850,6 +966,7 @@ async function startCall(type) {
 
     currentCallType = type;
     activeCallPartnerId = activeChatReceiverId;
+    callAnswered = false;
     const myUid = auth.currentUser.uid;
     currentCallRoomId = getChatRoomId(myUid, activeCallPartnerId);
 
@@ -874,7 +991,6 @@ async function startCall(type) {
             video: type === 'video' ? { facingMode: currentFacingMode } : false
         });
 
-        // নিশ্চিত করা যে অডিও ট্র্যাক চালু আছে
         localStream.getAudioTracks().forEach(track => {
             track.enabled = true;
         });
@@ -882,7 +998,7 @@ async function startCall(type) {
         const localVideo = document.getElementById("localVideo");
         if (localVideo) {
             localVideo.srcObject = localStream;
-            localVideo.muted = true; // Echo কমাতে লোকাল ভিডিও সবসময় মিউট
+            localVideo.muted = true;
             localVideo.style.display = type === 'video' ? 'block' : 'none';
         }
         const switchBtn = document.getElementById("switchCameraBtn");
@@ -899,6 +1015,7 @@ async function startCall(type) {
             if (remoteVideo) {
                 remoteVideo.srcObject = e.streams[0];
                 remoteVideo.muted = false;
+                remoteVideo.volume = 1.0;
                 remoteVideo.play().catch(() => {});
             }
         };
@@ -909,12 +1026,9 @@ async function startCall(type) {
             }
         };
 
-        // কানেকশন স্টেট মনিটর
         peerConnection.oniceconnectionstatechange = () => {
             const state = peerConnection.iceConnectionState;
-            console.log("ICE State:", state);
             if (state === "failed" || state === "disconnected" || state === "closed") {
-                // কিছুক্ষণ অপেক্ষা করে কেটে দেওয়া
                 setTimeout(() => {
                     if (peerConnection && (peerConnection.iceConnectionState === "failed" || peerConnection.iceConnectionState === "disconnected")) {
                         endCall();
@@ -951,6 +1065,7 @@ async function startCall(type) {
                 try {
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
                     stopRingtone();
+                    callAnswered = true;
                     startCallTimer();
                 } catch (err) {
                     console.error("Answer error:", err);
@@ -996,6 +1111,7 @@ function listenToIncomingCalls(myUid) {
         activeCallPartnerId = call.caller;
         currentCallType = call.type || "audio";
         currentCallRoomId = call.roomId;
+        callAnswered = false;
 
         document.getElementById("incomingCallerName").innerText = call.callerName || "Someone";
         document.getElementById("incomingCallType").innerText = 
@@ -1008,6 +1124,7 @@ function listenToIncomingCalls(myUid) {
 
 async function acceptIncomingCall() {
     stopRingtone();
+    callAnswered = true;
     
     const modal = document.getElementById("incomingCallModal");
     if (modal) modal.style.display = "none";
@@ -1059,6 +1176,7 @@ async function acceptIncomingCall() {
             if (remoteVideo) {
                 remoteVideo.srcObject = e.streams[0];
                 remoteVideo.muted = false;
+                remoteVideo.volume = 1.0;
                 remoteVideo.play().catch(() => {});
             }
         };
@@ -1132,19 +1250,36 @@ function rejectIncomingCall() {
     if (incomingCallerId && myUid) {
         const roomId = currentCallRoomId || getChatRoomId(myUid, incomingCallerId);
         update(ref(db, `calls/${roomId}`), { status: "rejected" });
+        
+        // কল লগ সেভ
+        saveCallLog(incomingCallerId, currentCallType || "audio", "rejected");
     }
     incomingCallerId = null;
     currentCallRoomId = null;
+    callAnswered = false;
 }
 
 function endCall() {
     stopRingtone();
     
     const myUid = auth.currentUser?.uid;
+    let durationSec = 0;
+    if (callStartTime) {
+        durationSec = Math.floor((Date.now() - callStartTime) / 1000);
+    }
+    
     if (activeCallPartnerId && myUid) {
         const roomId = currentCallRoomId || getChatRoomId(myUid, activeCallPartnerId);
         update(ref(db, `calls/${roomId}`), { status: "ended" });
         set(ref(db, `incomingCalls/${activeCallPartnerId}`), null);
+        
+        // কল লগ সেভ
+        if (callAnswered) {
+            saveCallLog(activeCallPartnerId, currentCallType || "audio", "answered", durationSec);
+        } else {
+            // কলার যদি কেটে দেয় রিসিভ না করে → রিসিভারের জন্য মিসড কল
+            saveCallLog(activeCallPartnerId, currentCallType || "audio", "missed");
+        }
     }
     endCallUI();
 }
@@ -1159,6 +1294,7 @@ function endCallUI() {
     incomingCallerId = null;
     activeCallPartnerId = null;
     currentCallRoomId = null;
+    callAnswered = false;
 
     if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
@@ -1606,7 +1742,10 @@ function toggleMuteMic() {
 function toggleSpeaker() {
     isSpeakerOn = !isSpeakerOn;
     const remoteVideo = document.getElementById("remoteVideo");
-    if (remoteVideo) remoteVideo.muted = !isSpeakerOn;
+    if (remoteVideo) {
+        remoteVideo.muted = !isSpeakerOn;
+        remoteVideo.volume = isSpeakerOn ? 1.0 : 0;
+    }
     document.getElementById("speakerBtn")?.classList.toggle("muted", !isSpeakerOn);
 }
 async function switchCamera() {
