@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getDatabase, ref, push, onValue, remove, update, set, get, onDisconnect, query, orderByChild, limitToLast } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+import { getDatabase, ref, push, onValue, remove, update, set, get, onDisconnect } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 const firebaseConfig = {
@@ -55,7 +55,6 @@ let isRingtonePlaying = false;
 
 // Online status
 let usersStatus = {};
-let chatMetaCache = {};
 
 function playRingtone() {
     stopRingtone();
@@ -180,7 +179,6 @@ function setupPresence(uid) {
     set(statusRef, { state: "online", last_changed: Date.now() });
     onDisconnect(statusRef).set({ state: "offline", last_changed: Date.now() });
 
-    // নিয়মিত অনলাইন আপডেট
     setInterval(() => {
         if (auth.currentUser) {
             set(statusRef, { state: "online", last_changed: Date.now() });
@@ -223,7 +221,6 @@ async function saveCallLog(partnerUid, callType, status, durationSec = 0) {
     const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const timestamp = Date.now();
 
-    // চ্যাটে কল লগ সেভ
     await push(ref(db, 'chats/' + roomId), {
         type: "call",
         callType: callType || "audio",
@@ -234,17 +231,17 @@ async function saveCallLog(partnerUid, callType, status, durationSec = 0) {
         timestamp: timestamp
     });
 
-    // চ্যাট মেটা আপডেট (লিস্টে উপরে উঠানোর জন্য)
-    await set(ref(db, `chatMeta/${roomId}`), {
-        lastActivity: timestamp,
-        lastMessage: status === "missed" ? "মিসড কল" : (status === "answered" ? "কল" : "কল"),
-        users: {
-            [currentUser.uid]: true,
-            [partnerUid]: true
-        }
-    });
+    try {
+        await set(ref(db, `chatMeta/${roomId}`), {
+            lastActivity: timestamp,
+            lastMessage: status === "missed" ? "মিসড কল" : (status === "answered" ? "কল" : "কল"),
+            users: {
+                [currentUser.uid]: true,
+                [partnerUid]: true
+            }
+        });
+    } catch (e) {}
 
-    // নোটিফিকেশন
     if (status === "missed") {
         sendNotification(partnerUid, `${cachedUserName} আপনাকে একটি মিসড ${callType === "video" ? "ভিডিও" : "অডিও"} কল দিয়েছেন`);
     }
@@ -707,7 +704,7 @@ function loadProfileStats(targetUid) {
     });
 }
 
-// ==================== CHAT LIST (Recent first) ====================
+// ==================== CHAT LIST (Fixed - never empty) ====================
 async function loadChatUsersList() {
     const listContainer = document.getElementById("usersForChatList");
     if (!listContainer) return;
@@ -716,69 +713,79 @@ async function loadChatUsersList() {
     const currentUser = auth.currentUser;
     if (!currentUser) return;
 
-    // সব ইউজার + chatMeta একসাথে নেওয়া
-    const [usersSnap, metaSnap] = await Promise.all([
-        get(ref(db, 'userProfile')),
-        get(ref(db, 'chatMeta'))
-    ]);
+    listContainer.innerHTML = "<div style='padding:15px; text-align:center; color:gray;'>লোড হচ্ছে...</div>";
 
-    listContainer.innerHTML = "";
-    if (!usersSnap.exists()) {
-        listContainer.innerHTML = "<div style='padding:15px; text-align:center; color:gray;'>কোনো ইউজার পাওয়া যায়নি</div>";
-        return;
-    }
+    try {
+        const usersSnap = await get(ref(db, 'userProfile'));
+        if (!usersSnap.exists()) {
+            listContainer.innerHTML = "<div style='padding:15px; text-align:center; color:gray;'>কোনো ইউজার পাওয়া যায়নি</div>";
+            return;
+        }
 
-    const users = usersSnap.val();
-    const metas = metaSnap.exists() ? metaSnap.val() : {};
+        const users = usersSnap.val();
+        let metas = {};
 
-    // ইউজারদের লিস্ট বানানো + lastActivity যোগ করা
-    let userList = [];
-    Object.keys(users).forEach(uid => {
-        if (uid === currentUser.uid) return;
-        const roomId = getChatRoomId(currentUser.uid, uid);
-        const lastActivity = metas[roomId]?.lastActivity || 0;
-        userList.push({
-            uid,
-            name: users[uid].name || "User",
-            photo: users[uid].photo || "",
-            lastActivity
+        try {
+            const metaSnap = await get(ref(db, 'chatMeta'));
+            if (metaSnap.exists()) metas = metaSnap.val();
+        } catch (e) {
+            // chatMeta না থাকলেও চলবে
+        }
+
+        let userList = [];
+        Object.keys(users).forEach(uid => {
+            if (uid === currentUser.uid) return;
+            const roomId = getChatRoomId(currentUser.uid, uid);
+            const lastActivity = metas[roomId]?.lastActivity || 0;
+            userList.push({
+                uid,
+                name: users[uid].name || "User",
+                photo: users[uid].photo || "",
+                lastActivity
+            });
         });
-    });
 
-    // সাম্প্রতিক অ্যাকটিভিটি অনুসারে সর্ট (বড় থেকে ছোট)
-    userList.sort((a, b) => b.lastActivity - a.lastActivity);
+        // সাম্প্রতিক অ্যাকটিভিটি অনুসারে সর্ট
+        userList.sort((a, b) => b.lastActivity - a.lastActivity);
 
-    if (userList.length === 0) {
-        listContainer.innerHTML = "<div style='padding:15px; text-align:center; color:gray;'>অন্য কোনো ইউজার নেই</div>";
-        return;
+        listContainer.innerHTML = "";
+
+        if (userList.length === 0) {
+            listContainer.innerHTML = "<div style='padding:15px; text-align:center; color:gray;'>অন্য কোনো ইউজার নেই</div>";
+            return;
+        }
+
+        userList.forEach(u => {
+            const online = isUserOnline(u.uid);
+            const lastSeen = getLastSeenText(u.uid);
+
+            const pic = u.photo
+                ? `<div style="position:relative; width:44px; height:44px;">
+                     <img src="${u.photo}" style="width:44px; height:44px; border-radius:50%; object-fit:cover;">
+                     ${online ? '<span style="position:absolute; bottom:1px; right:1px; width:13px; height:13px; background:#25D366; border:2px solid #fff; border-radius:50%;"></span>' : ''}
+                   </div>`
+                : `<div style="position:relative; width:44px; height:44px;">
+                     <div style="width:44px; height:44px; border-radius:50%; background:#ccc; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:18px;">${(u.name || 'U')[0]}</div>
+                     ${online ? '<span style="position:absolute; bottom:1px; right:1px; width:13px; height:13px; background:#25D366; border:2px solid #fff; border-radius:50%;"></span>' : ''}
+                   </div>`;
+
+            const item = document.createElement("div");
+            item.style.cssText = "display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom:1px solid #eee; cursor:pointer; background:#fff;";
+            item.innerHTML = `
+                ${pic}
+                <div style="flex:1; min-width:0;">
+                    <div style="font-weight:600; font-size:15px; color:#111;">${u.name}</div>
+                    <div style="font-size:12px; color:${online ? '#25D366' : '#888'}; margin-top:2px;">${lastSeen}</div>
+                </div>
+            `;
+            item.onclick = () => openChatRoom(u.uid, u.name);
+            listContainer.appendChild(item);
+        });
+
+    } catch (err) {
+        console.error("loadChatUsersList error:", err);
+        listContainer.innerHTML = "<div style='padding:15px; text-align:center; color:red;'>লিস্ট লোড করতে সমস্যা হয়েছে</div>";
     }
-
-    userList.forEach(u => {
-        const online = isUserOnline(u.uid);
-        const lastSeen = getLastSeenText(u.uid);
-
-        const pic = u.photo
-            ? `<div style="position:relative; width:44px; height:44px;">
-                 <img src="${u.photo}" style="width:44px; height:44px; border-radius:50%; object-fit:cover;">
-                 ${online ? '<span style="position:absolute; bottom:1px; right:1px; width:13px; height:13px; background:#25D366; border:2px solid #fff; border-radius:50%;"></span>' : ''}
-               </div>`
-            : `<div style="position:relative; width:44px; height:44px;">
-                 <div style="width:44px; height:44px; border-radius:50%; background:#ccc; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:18px;">${(u.name || 'U')[0]}</div>
-                 ${online ? '<span style="position:absolute; bottom:1px; right:1px; width:13px; height:13px; background:#25D366; border:2px solid #fff; border-radius:50%;"></span>' : ''}
-               </div>`;
-
-        const item = document.createElement("div");
-        item.style.cssText = "display:flex; align-items:center; gap:12px; padding:12px 10px; border-bottom:1px solid #eee; cursor:pointer; background:#fff;";
-        item.innerHTML = `
-            ${pic}
-            <div style="flex:1; min-width:0;">
-                <div style="font-weight:600; font-size:15px; color:#111;">${u.name}</div>
-                <div style="font-size:12px; color:${online ? '#25D366' : '#888'}; margin-top:2px;">${lastSeen}</div>
-            </div>
-        `;
-        item.onclick = () => openChatRoom(u.uid, u.name);
-        listContainer.appendChild(item);
-    });
 }
 
 function openChatRoom(receiverUid, receiverName) {
@@ -815,12 +822,13 @@ function sendDirectMessage() {
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         timestamp
     }).then(() => {
-        // মেটা আপডেট
-        set(ref(db, `chatMeta/${roomId}`), {
-            lastActivity: timestamp,
-            lastMessage: text,
-            users: { [currentUser.uid]: true, [activeChatReceiverId]: true }
-        });
+        try {
+            set(ref(db, `chatMeta/${roomId}`), {
+                lastActivity: timestamp,
+                lastMessage: text,
+                users: { [currentUser.uid]: true, [activeChatReceiverId]: true }
+            });
+        } catch (e) {}
         sendNotification(activeChatReceiverId, `${cachedUserName} আপনাকে একটি মেসেজ পাঠিয়েছেন।`);
         input.value = "";
         toggleMicSendButton();
@@ -841,11 +849,13 @@ async function sendChatImage(e) {
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             timestamp
         });
-        set(ref(db, `chatMeta/${roomId}`), {
-            lastActivity: timestamp,
-            lastMessage: "ছবি",
-            users: { [currentUser.uid]: true, [activeChatReceiverId]: true }
-        });
+        try {
+            set(ref(db, `chatMeta/${roomId}`), {
+                lastActivity: timestamp,
+                lastMessage: "ছবি",
+                users: { [currentUser.uid]: true, [activeChatReceiverId]: true }
+            });
+        } catch (e) {}
         sendNotification(activeChatReceiverId, `${cachedUserName} আপনাকে একটি ছবি পাঠিয়েছেন।`);
     } catch (err) {
         alert("ছবি পাঠাতে সমস্যা হয়েছে");
@@ -872,11 +882,13 @@ async function sendChatVideo(e) {
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             timestamp
         });
-        set(ref(db, `chatMeta/${roomId}`), {
-            lastActivity: timestamp,
-            lastMessage: "ভিডিও",
-            users: { [currentUser.uid]: true, [activeChatReceiverId]: true }
-        });
+        try {
+            set(ref(db, `chatMeta/${roomId}`), {
+                lastActivity: timestamp,
+                lastMessage: "ভিডিও",
+                users: { [currentUser.uid]: true, [activeChatReceiverId]: true }
+            });
+        } catch (e) {}
         sendNotification(activeChatReceiverId, `${cachedUserName} আপনাকে একটি ভিডিও পাঠিয়েছেন।`);
     } catch (err) {
         alert("ভিডিও পাঠাতে সমস্যা হয়েছে");
@@ -959,11 +971,13 @@ async function sendAudioMessage(base64Audio) {
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             timestamp
         });
-        set(ref(db, `chatMeta/${roomId}`), {
-            lastActivity: timestamp,
-            lastMessage: "ভয়েস নোট",
-            users: { [currentUser.uid]: true, [activeChatReceiverId]: true }
-        });
+        try {
+            set(ref(db, `chatMeta/${roomId}`), {
+                lastActivity: timestamp,
+                lastMessage: "ভয়েস নোট",
+                users: { [currentUser.uid]: true, [activeChatReceiverId]: true }
+            });
+        } catch (e) {}
         sendNotification(activeChatReceiverId, `${cachedUserName} আপনাকে একটি ভয়েস নোট পাঠিয়েছেন।`);
     } catch (err) {
         alert("ভয়েস নোট পাঠাতে সমস্যা হয়েছে");
@@ -984,7 +998,6 @@ function listenToMessages(receiverUid) {
         }
 
         Object.values(snapshot.val()).forEach(m => {
-            // CALL LOG
             if (m.type === "call") {
                 const isMe = m.sender === currentUser.uid;
                 let icon = "📞";
@@ -1025,7 +1038,6 @@ function listenToMessages(receiverUid) {
                 return;
             }
 
-            // NORMAL MESSAGE
             const isMe = m.sender === currentUser.uid;
             const isImageOnly = m.image && !m.text && !m.audio && !m.video;
             const msgDiv = document.createElement("div");
@@ -1065,7 +1077,7 @@ async function startCall(type) {
     document.getElementById("callModal").style.display = "flex";
     document.getElementById("callPartnerName").innerText = document.getElementById("chatReceiverName")?.innerText || "User";
 
-    // অনলাইন/অফলাইন অনুসারে টেক্সট
+    // অনলাইন থাকলে রিং, অফলাইন থাকলে কলিং
     const partnerOnline = isUserOnline(activeCallPartnerId);
     document.getElementById("callTimer").innerText = partnerOnline ? "রিং..." : "কলিং...";
 
@@ -1361,7 +1373,6 @@ function endCall() {
         if (callAnswered) {
             saveCallLog(activeCallPartnerId, currentCallType || "audio", "answered", durationSec);
         } else {
-            // কলার যদি কেটে দেয় → মিসড কল
             saveCallLog(activeCallPartnerId, currentCallType || "audio", "missed");
         }
     }
