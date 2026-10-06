@@ -36,7 +36,7 @@ let callStartTime = null;
 let callTimerInterval = null;
 let currentFacingMode = 'user';
 let currentCallRoomId = null;
-let callAnswered = false; // কল রিসিভ হয়েছিল কিনা
+let callAnswered = false;
 
 // Audio recording
 let mediaRecorder = null;
@@ -52,7 +52,7 @@ let ringtoneGain = null;
 let ringtoneInterval = null;
 let isRingtonePlaying = false;
 
-// Online status cache
+// Online status
 let usersStatus = {};
 
 function playRingtone() {
@@ -172,43 +172,72 @@ function fileToBase64(file, maxWidth = 800) {
     });
 }
 
-// ==================== PRESENCE (ONLINE/OFFLINE) ====================
+// ==================== PRESENCE ====================
 function setupPresence(uid) {
     const statusRef = ref(db, `status/${uid}`);
-    const isOnline = { state: "online", last_changed: Date.now() };
-    const isOffline = { state: "offline", last_changed: Date.now() };
-
-    set(statusRef, isOnline);
-    onDisconnect(statusRef).set(isOffline);
+    
+    const setOnline = () => {
+        set(statusRef, {
+            state: "online",
+            last_changed: Date.now()
+        });
+    };
+    
+    setOnline();
+    
+    // পেজ বন্ধ/রিফ্রেশ হলে অফলাইন
+    onDisconnect(statusRef).set({
+        state: "offline",
+        last_changed: Date.now()
+    });
+    
+    // প্রতি ২৫ সেকেন্ডে অনলাইন আপডেট (মোবাইলে ভালো কাজ করে)
+    setInterval(() => {
+        if (auth.currentUser) {
+            set(statusRef, {
+                state: "online",
+                last_changed: Date.now()
+            });
+        }
+    }, 25000);
 }
 
 function listenToAllStatus() {
     onValue(ref(db, 'status'), (snapshot) => {
         usersStatus = snapshot.val() || {};
-        // চ্যাট লিস্ট আপডেট করতে চাইলে
-        if (activeTab === 'msgTab') {
-            // রি-রেন্ডার না করে শুধু ডট আপডেট করা যায়, এখন সহজ রাখছি
+        // চ্যাট লিস্ট ওপেন থাকলে রিফ্রেশ
+        if (activeTab === 'msgTab' && document.getElementById("chatUserList")?.style.display !== "none") {
+            loadChatUsersList();
         }
     });
+}
+
+function isUserOnline(uid) {
+    const s = usersStatus[uid];
+    if (!s) return false;
+    // ৪৫ সেকেন্ডের মধ্যে আপডেট না থাকলে অফলাইন ধরা
+    if (s.state === "online" && (Date.now() - (s.last_changed || 0)) < 45000) {
+        return true;
+    }
+    return false;
 }
 
 function getLastSeenText(uid) {
     const status = usersStatus[uid];
     if (!status) return "অফলাইন";
-    if (status.state === "online") return "অনলাইন";
+    
+    if (isUserOnline(uid)) return "অনলাইন";
     
     const last = status.last_changed || 0;
+    if (!last) return "অফলাইন";
+    
     const date = new Date(last);
     const now = new Date();
     const isToday = date.toDateString() === now.toDateString();
-    
     const timeStr = date.toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' });
+    
     if (isToday) return `শেষ দেখা ${timeStr}`;
     return `শেষ দেখা ${date.toLocaleDateString('bn-BD')} ${timeStr}`;
-}
-
-function isUserOnline(uid) {
-    return usersStatus[uid]?.state === "online";
 }
 
 // ==================== CALL LOG ====================
@@ -221,13 +250,21 @@ async function saveCallLog(partnerUid, callType, status, durationSec = 0) {
     
     await push(ref(db, 'chats/' + roomId), {
         type: "call",
-        callType: callType || "audio",   // audio / video
-        status: status,                  // missed / answered / rejected / outgoing
+        callType: callType || "audio",
+        status: status,          // missed / answered / rejected
         duration: durationSec,
         sender: currentUser.uid,
         time: timeNow,
         timestamp: Date.now()
     });
+    
+    // নোটিফিকেশন
+    if (status === "missed") {
+        sendNotification(partnerUid, `${cachedUserName} আপনাকে একটি মিসড ${callType === "video" ? "ভিডিও" : "অডিও"} কল দিয়েছেন`);
+    } else if (status === "rejected") {
+        // রিজেক্ট করলে কলারকে নোটিফিকেশন
+        // (রিসিভার রিজেক্ট করলে)
+    }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -382,7 +419,10 @@ function handleLogout() {
     endCallUI();
     const user = auth.currentUser;
     if (user) {
-        set(ref(db, `status/${user.uid}`), { state: "offline", last_changed: Date.now() });
+        set(ref(db, `status/${user.uid}`), {
+            state: "offline",
+            last_changed: Date.now()
+        });
     }
     signOut(auth);
 }
@@ -711,13 +751,13 @@ function loadChatUsersList() {
             const lastSeen = getLastSeenText(uid);
             
             const pic = u.photo
-                ? `<div style="position:relative; width:42px; height:42px;">
-                     <img src="${u.photo}" style="width:42px; height:42px; border-radius:50%; object-fit:cover;">
-                     ${online ? '<span style="position:absolute; bottom:0; right:0; width:12px; height:12px; background:#25D366; border:2px solid #fff; border-radius:50%;"></span>' : ''}
+                ? `<div style="position:relative; width:44px; height:44px;">
+                     <img src="${u.photo}" style="width:44px; height:44px; border-radius:50%; object-fit:cover;">
+                     ${online ? '<span style="position:absolute; bottom:1px; right:1px; width:13px; height:13px; background:#25D366; border:2px solid #fff; border-radius:50%;"></span>' : ''}
                    </div>`
-                : `<div style="position:relative; width:42px; height:42px;">
-                     <div style="width:42px; height:42px; border-radius:50%; background:#ccc; display:flex; align-items:center; justify-content:center; font-weight:bold;">${(u.name || 'U')[0]}</div>
-                     ${online ? '<span style="position:absolute; bottom:0; right:0; width:12px; height:12px; background:#25D366; border:2px solid #fff; border-radius:50%;"></span>' : ''}
+                : `<div style="position:relative; width:44px; height:44px;">
+                     <div style="width:44px; height:44px; border-radius:50%; background:#ccc; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:18px;">${(u.name || 'U')[0]}</div>
+                     ${online ? '<span style="position:absolute; bottom:1px; right:1px; width:13px; height:13px; background:#25D366; border:2px solid #fff; border-radius:50%;"></span>' : ''}
                    </div>`;
             
             const item = document.createElement("div");
@@ -725,8 +765,8 @@ function loadChatUsersList() {
             item.innerHTML = `
                 ${pic}
                 <div style="flex:1; min-width:0;">
-                    <div style="font-weight:600; font-size:15px;">${u.name || 'User'}</div>
-                    <div style="font-size:12px; color:${online ? '#25D366' : '#888'};">${lastSeen}</div>
+                    <div style="font-weight:600; font-size:15px; color:#111;">${u.name || 'User'}</div>
+                    <div style="font-size:12px; color:${online ? '#25D366' : '#888'}; margin-top:2px;">${lastSeen}</div>
                 </div>
             `;
             item.onclick = () => openChatRoom(uid, u.name || 'User');
@@ -901,45 +941,71 @@ function listenToMessages(receiverUid) {
     const displayArea = document.getElementById("messageDisplayArea");
     if (!currentUser || !displayArea) return;
     const roomId = getChatRoomId(currentUser.uid, receiverUid);
+    
     onValue(ref(db, 'chats/' + roomId), (snapshot) => {
         displayArea.innerHTML = "";
         if (!snapshot.exists()) {
             displayArea.innerHTML = "<div style='text-align:center; color:gray; font-size:12px; margin-top:20px;'>কথা বলা শুরু করুন...</div>";
             return;
         }
+        
         Object.values(snapshot.val()).forEach(m => {
-            // Call log message
+            // ========== CALL LOG ==========
             if (m.type === "call") {
                 const isMe = m.sender === currentUser.uid;
                 let icon = "📞";
                 let text = "";
-                let color = "#555";
+                let bgColor = "#f0f0f0";
+                let textColor = "#333";
                 
                 if (m.status === "missed") {
                     icon = "📵";
                     text = m.callType === "video" ? "মিসড ভিডিও কল" : "মিসড অডিও কল";
-                    color = "#e74c3c";
+                    bgColor = "#ffeaea";
+                    textColor = "#c0392b";
                 } else if (m.status === "rejected") {
                     icon = "🚫";
                     text = "কল রিজেক্ট করা হয়েছে";
-                    color = "#e67e22";
+                    bgColor = "#fff3e0";
+                    textColor = "#e67e22";
                 } else if (m.status === "answered") {
                     icon = m.callType === "video" ? "📹" : "📞";
-                    const dur = m.duration ? ` (${Math.floor(m.duration/60)}:${(m.duration%60).toString().padStart(2,'0')})` : "";
+                    const dur = m.duration ? ` • ${Math.floor(m.duration/60)}:${(m.duration%60).toString().padStart(2,'0')}` : "";
                     text = (m.callType === "video" ? "ভিডিও কল" : "অডিও কল") + dur;
-                    color = "#27ae60";
+                    bgColor = "#e8f5e9";
+                    textColor = "#27ae60";
                 } else {
-                    icon = "📞";
                     text = "কল";
                 }
                 
                 const callDiv = document.createElement("div");
-                callDiv.style.cssText = `text-align:center; margin:12px 0; font-size:13px; color:${color};`;
-                callDiv.innerHTML = `${icon} ${text} <span style="color:#999; font-size:11px;">${m.time || ''}</span>`;
+                callDiv.style.cssText = `
+                    display: flex;
+                    justify-content: ${isMe ? 'flex-end' : 'flex-start'};
+                    margin: 8px 12px;
+                `;
+                callDiv.innerHTML = `
+                    <div style="
+                        background: ${bgColor};
+                        color: ${textColor};
+                        padding: 8px 14px;
+                        border-radius: 18px;
+                        font-size: 13px;
+                        max-width: 75%;
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                    ">
+                        <span>${icon}</span>
+                        <span>${text}</span>
+                        <span style="font-size:11px; opacity:0.7; margin-left:4px;">${m.time || ''}</span>
+                    </div>
+                `;
                 displayArea.appendChild(callDiv);
                 return;
             }
 
+            // ========== NORMAL MESSAGE ==========
             const isMe = m.sender === currentUser.uid;
             const isImageOnly = m.image && !m.text && !m.audio && !m.video;
             const msgDiv = document.createElement("div");
@@ -991,9 +1057,7 @@ async function startCall(type) {
             video: type === 'video' ? { facingMode: currentFacingMode } : false
         });
 
-        localStream.getAudioTracks().forEach(track => {
-            track.enabled = true;
-        });
+        localStream.getAudioTracks().forEach(track => track.enabled = true);
 
         const localVideo = document.getElementById("localVideo");
         if (localVideo) {
@@ -1027,7 +1091,7 @@ async function startCall(type) {
         };
 
         peerConnection.oniceconnectionstatechange = () => {
-            const state = peerConnection.iceConnectionState;
+            const state = peerConnection?.iceConnectionState;
             if (state === "failed" || state === "disconnected" || state === "closed") {
                 setTimeout(() => {
                     if (peerConnection && (peerConnection.iceConnectionState === "failed" || peerConnection.iceConnectionState === "disconnected")) {
@@ -1067,9 +1131,7 @@ async function startCall(type) {
                     stopRingtone();
                     callAnswered = true;
                     startCallTimer();
-                } catch (err) {
-                    console.error("Answer error:", err);
-                }
+                } catch (err) {}
             }
         });
 
@@ -1104,8 +1166,7 @@ function listenToIncomingCalls(myUid) {
         if (!call || call.status !== "ringing") return;
 
         const modal = document.getElementById("incomingCallModal");
-        if (!modal) return;
-        if (modal.style.display === "flex") return;
+        if (!modal || modal.style.display === "flex") return;
 
         incomingCallerId = call.caller;
         activeCallPartnerId = call.caller;
@@ -1152,9 +1213,7 @@ async function acceptIncomingCall() {
             video: currentCallType === "video" ? { facingMode: currentFacingMode } : false
         });
 
-        localStream.getAudioTracks().forEach(track => {
-            track.enabled = true;
-        });
+        localStream.getAudioTracks().forEach(track => track.enabled = true);
 
         const localVideo = document.getElementById("localVideo");
         if (localVideo) {
@@ -1188,7 +1247,7 @@ async function acceptIncomingCall() {
         };
 
         peerConnection.oniceconnectionstatechange = () => {
-            const state = peerConnection.iceConnectionState;
+            const state = peerConnection?.iceConnectionState;
             if (state === "failed" || state === "disconnected" || state === "closed") {
                 setTimeout(() => {
                     if (peerConnection && (peerConnection.iceConnectionState === "failed" || peerConnection.iceConnectionState === "disconnected")) {
@@ -1251,7 +1310,7 @@ function rejectIncomingCall() {
         const roomId = currentCallRoomId || getChatRoomId(myUid, incomingCallerId);
         update(ref(db, `calls/${roomId}`), { status: "rejected" });
         
-        // কল লগ সেভ
+        // রিজেক্ট লগ (রিসিভার সাইড থেকে)
         saveCallLog(incomingCallerId, currentCallType || "audio", "rejected");
     }
     incomingCallerId = null;
@@ -1273,11 +1332,10 @@ function endCall() {
         update(ref(db, `calls/${roomId}`), { status: "ended" });
         set(ref(db, `incomingCalls/${activeCallPartnerId}`), null);
         
-        // কল লগ সেভ
         if (callAnswered) {
             saveCallLog(activeCallPartnerId, currentCallType || "audio", "answered", durationSec);
         } else {
-            // কলার যদি কেটে দেয় রিসিভ না করে → রিসিভারের জন্য মিসড কল
+            // কলার কেটে দিলে → রিসিভারের জন্য মিসড কল
             saveCallLog(activeCallPartnerId, currentCallType || "audio", "missed");
         }
     }
